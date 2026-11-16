@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>finanzmanager</Name>
+  <Repository>finanzmanager:latest</Repository>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Overview>Persönlicher Finanzmanager: Konten, Buchungen, Verträge, Kredite. Daten bleiben auf dem Server. Umsatzabruf per FinTS.</Overview>
+  <Category>Tools:</Category>
+  <WebUI>http://[IP]:[PORT:8080]/</WebUI>
+  <Config Name="Web-Port" Target="8080" Default="8090" Mode="tcp" Description="Port der Weboberfläche" Type="Port" Display="always" Required="true">8090</Config>
+  <Config Name="Daten" Target="/data" Default="/mnt/user/appdata/finanzmanager" Mode="rw" Description="Daten, Sicherungen und FinTS-Zustand" Type="Path" Display="always" Required="true">/mnt/user/appdata/finanzmanager</Config>
+  <Config Name="Passwort" Target="APP_PASSWORD" Default="" Description="Passwort für die Weboberfläche (Benutzername beliebig). Leer = keine Anmeldung." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="FinTS-Produkt-ID" Target="FINTS_PRODUCT_ID" Default="" Description="Registrierungsnummer der Deutschen Kreditwirtschaft für den FinTS-Abruf" Type="Variable" Display="always" Required="false"></Config>
+  <Config Name="Zeitzone" Target="TZ" Default="Europe/Berlin" Description="" Type="Variable" Display="advanced" Required="false">Europe/Berlin</Config>
+</Container>

@@ -1,0 +1,382 @@
+<title>Finanzmanager Brainstorming</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: schmale Kopfzeile, dann Abschnitte als Raster aus Ideenkarten; jede Funktion bekommt eine Priorität (Muss / Soll / Später), die oben zusammengezählt wird. */
+:root {
+  --bg: #f3f5f6;
+  --surface: #ffffff;
+  --fg: #16232b;
+  --muted: #5b6b74;
+  --line: #d9e0e4;
+  --accent: #0f7a6c;
+  --accent-soft: #e0f1ee;
+  --must: #0f7a6c;
+  --should: #b7791f;
+  --later: #6b7a85;
+  --minus: #b4413a;
+  --font-display: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1518; --surface: #162126; --fg: #e3eaed; --muted: #93a3ab; --line: #26353c;
+    --accent: #3cc2ad; --accent-soft: #15302c; --must: #3cc2ad; --should: #e0a84a; --later: #8b9aa3; --minus: #e2766e;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1518; --surface: #162126; --fg: #e3eaed; --muted: #93a3ab; --line: #26353c;
+  --accent: #3cc2ad; --accent-soft: #15302c; --must: #3cc2ad; --should: #e0a84a; --later: #8b9aa3; --minus: #e2766e;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-body); font-size: 15px; line-height: 1.55;
+}
+.wrap {
+  max-width: 1100px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 64px;
+  display: flex; flex-direction: column; gap: 48px;
+}
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(28px, 5vw, 40px); line-height: 1.1; }
+h2 { font-size: 22px; }
+h3 { font-size: 16px; }
+p { margin: 0; }
+.eyebrow { font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+header { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 32px; align-items: end; }
+header .lead { color: var(--muted); max-width: 60ch; margin-top: 12px; }
+.ledger {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px;
+  font-family: var(--font-mono); font-size: 13px; font-variant-numeric: tabular-nums;
+}
+.ledger .row { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; border-bottom: 1px dashed var(--line); }
+.ledger .row:last-child { border-bottom: 0; font-weight: 500; }
+.ledger .cat { color: var(--muted); font-size: 11px; }
+.neg { color: var(--minus); }
+.pos { color: var(--accent); }
+
+.tally { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 13px; font-weight: 500; border: 1px solid var(--line); background: var(--surface); }
+.dot { width: 8px; height: 8px; border-radius: 50%; }
+.d-must { background: var(--must); } .d-should { background: var(--should); } .d-later { background: var(--later); }
+.tally button { font: inherit; font-size: 13px; color: var(--muted); background: none; border: 0; cursor: pointer; text-decoration: underline; padding: 4px; }
+.tally button.copy { color: var(--surface); background: var(--accent); text-decoration: none; border-radius: 999px; padding: 4px 12px; font-weight: 600; }
+.tally textarea { width: 100%; min-height: 110px; font: 13px/1.5 var(--font-mono); background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+
+section { display: flex; flex-direction: column; gap: 18px; }
+section > .head { display: flex; flex-direction: column; gap: 4px; }
+section > .head p { color: var(--muted); max-width: 70ch; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 12px; }
+.card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0;
+}
+.card[data-prio="must"] { border-left: 3px solid var(--must); }
+.card[data-prio="should"] { border-left: 3px solid var(--should); }
+.card[data-prio="later"] { border-left: 3px solid var(--later); }
+.card p { color: var(--muted); font-size: 14px; }
+.card ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 14px; }
+.prio { display: flex; gap: 4px; margin-top: auto; padding-top: 6px; }
+.prio button {
+  font: inherit; font-size: 12px; font-weight: 500; padding: 3px 9px; border-radius: 6px; cursor: pointer;
+  background: transparent; color: var(--muted); border: 1px solid var(--line);
+}
+.prio button:hover { color: var(--fg); }
+.prio button:focus-visible, .tally button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.prio button[aria-pressed="true"][data-v="must"] { background: var(--must); border-color: var(--must); color: var(--surface); }
+.prio button[aria-pressed="true"][data-v="should"] { background: var(--should); border-color: var(--should); color: var(--surface); }
+.prio button[aria-pressed="true"][data-v="later"] { background: var(--later); border-color: var(--later); color: var(--surface); }
+
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 12px; }
+.table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; min-width: 620px; font-size: 14px; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+td.yes { color: var(--accent); font-weight: 500; }
+
+tr.chosen td { background: var(--accent-soft); }
+.tag { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 6px; margin-left: 6px; vertical-align: 2px; }
+.flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 12px; counter-reset: step; margin: 0; padding: 0; list-style: none; }
+.flow li { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; counter-increment: step; }
+.flow li::before { content: "Schritt " counter(step); font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
+.flow li p { color: var(--muted); font-size: 14px; }
+.note { border: 1px solid var(--should); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; }
+.note b { color: var(--should); }
+.paths { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 12px; }
+.mvp { background: var(--accent-soft); border-radius: 10px; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+.mvp ol { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+.questions { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; }
+.questions li::marker { color: var(--accent); }
+footer { color: var(--muted); font-size: 13px; }
+
+@media (max-width: 760px) { header { grid-template-columns: 1fr; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <div class="eyebrow">Brainstorming · Persönliche Finanzsoftware</div>
+      <h1>Finanzmanager: Was soll er können?</h1>
+      <p class="lead">Eine Sammlung von Ideen als Ausgangspunkt. Markiere bei jeder Funktion, ob sie für dich <b>Muss</b>, <b>Soll</b> oder <b>Später</b> ist. Deine Auswahl wird in diesem Browser gespeichert, damit wir danach den ersten Umfang festlegen können.</p>
+    </div>
+    <div class="ledger" aria-label="Beispiel einer Umsatzliste">
+      <div class="row"><span>01.11. Miete <span class="cat">Wohnen</span></span><span class="neg">−950,00 €</span></div>
+      <div class="row"><span>03.11. Gehalt <span class="cat">Einnahmen</span></span><span class="pos">+3.120,00 €</span></div>
+      <div class="row"><span>05.11. REWE <span class="cat">Lebensmittel</span></span><span class="neg">−64,37 €</span></div>
+      <div class="row"><span>15.11. Rundfunkbeitrag <span class="cat">Fixkosten</span></span><span class="neg">−55,08 €</span></div>
+      <div class="row"><span>Saldo Girokonto</span><span>2.418,52 €</span></div>
+    </div>
+  </header>
+
+  <div class="tally" id="tally" aria-live="polite"></div>
+
+  <section>
+    <div class="head">
+      <div class="eyebrow">Kern</div>
+      <h2>Grundfunktionen</h2>
+      <p>Das Fundament: Geld sehen, ordnen und verstehen.</p>
+    </div>
+    <div class="grid">
+      <div class="card" data-id="konten"><h3>Konten verwalten</h3><p>Girokonto, Tagesgeld, Kreditkarte, Bargeld, Depot. Jedes mit eigenem Saldo und Gesamtvermögen oben.</p></div>
+      <div class="card" data-id="buchungen"><h3>Buchungen erfassen</h3><p>Einnahmen, Ausgaben und Umbuchungen zwischen eigenen Konten, mit Datum, Betrag, Empfänger und Notiz.</p></div>
+      <div class="card" data-id="kategorien"><h3>Kategorien &amp; Tags</h3><p>Eigene Kategorien mit Unterkategorien (Wohnen › Strom). Tags für Querschnitte wie „Urlaub 2026“.</p></div>
+      <div class="card" data-id="regeln"><h3>Automatische Zuordnung</h3><p>Regeln wie „Empfänger enthält REWE → Lebensmittel“. Lernt aus deinen Korrekturen.</p></div>
+      <div class="card" data-id="dashboard"><h3>Übersicht / Dashboard</h3><p>Monat auf einen Blick: Einnahmen, Ausgaben, Sparquote, größte Kategorien, Kontostände.</p></div>
+      <div class="card" data-id="suche"><h3>Suche &amp; Filter</h3><p>Nach Betrag, Zeitraum, Kategorie, Text. „Was habe ich 2026 bei Amazon ausgegeben?“</p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <div class="eyebrow">Planen</div>
+      <h2>Budgets, Ziele und Fixkosten</h2>
+      <p>Vom Rückblick zum Vorausschauen.</p>
+    </div>
+    <div class="grid">
+      <div class="card" data-id="budgets"><h3>Monatsbudgets</h3><p>Limit pro Kategorie mit Fortschrittsbalken und Warnung bei 80 %. Optional Restbetrag in den nächsten Monat übertragen.</p></div>
+      <div class="card" data-id="sparziele"><h3>Sparziele</h3><p>„Neues Auto: 8.000 € bis 12/2027“ mit nötiger Monatsrate und Fortschritt.</p></div>
+      <div class="card" data-id="vertraege"><h3>Verträge &amp; Abos</h3><p>Handy, Streaming, Versicherungen, Fitnessstudio. Mit Laufzeit, Kündigungsfrist und Erinnerung vor der Verlängerung.</p></div>
+      <div class="card" data-id="prognose"><h3>Kontostand-Prognose</h3><p>Aus wiederkehrenden Buchungen berechnen, wie der Kontostand am Monatsende aussieht.</p></div>
+      <div class="card" data-id="umschlag"><h3>Umschlag-Methode</h3><p>Jeder Euro bekommt eine Aufgabe (Zero-Based Budgeting). Alternative zu klassischen Budgets.</p></div>
+      <div class="card" data-id="schulden"><h3>Kredite &amp; Schulden</h3><p>Restschuld, Tilgungsplan, Zinsen. Was bringt eine Sondertilgung?</p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <div class="eyebrow">Daten rein</div>
+      <h2>Import und Bankanbindung</h2>
+      <p>Der größte Aufwand liegt meist hier. Je weniger Tipparbeit, desto eher wird die Software benutzt.</p>
+    </div>
+    <div class="grid">
+      <div class="card" data-id="csv"><h3>CSV-Import</h3><p>Kontoauszüge von Sparkasse, ING, DKB, Comdirect usw. einlesen, mit Vorlagen pro Bank und Duplikat-Erkennung.</p></div>
+      <div class="card" data-id="camt"><h3>CAMT / MT940</h3><p>Standardformate, die fast jede deutsche Bank exportiert. Zuverlässiger als CSV.</p></div>
+      <div class="card" data-id="fints"><h3>FinTS / HBCI direkt</h3><p>Umsätze direkt von der Bank abrufen. Komplex (TAN-Verfahren, Registrierung bei der Deutschen Kreditwirtschaft).</p></div>
+      <div class="card" data-id="psd2"><h3>Open-Banking-Dienst</h3><p>Anbindung über einen PSD2-Anbieter (z. B. GoCardless, finAPI). Bequem, aber Daten laufen über Dritte und es fallen ggf. Kosten an.</p></div>
+      <div class="card" data-id="belege"><h3>Belege &amp; Fotos</h3><p>Kassenbon oder Rechnung als Bild/PDF an eine Buchung hängen. Später evtl. Texterkennung.</p></div>
+      <div class="card" data-id="export"><h3>Export &amp; Backup</h3><p>Alles als CSV/Excel exportieren, Backup-Datei erstellen und wiederherstellen.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <div class="eyebrow">Pflicht</div>
+      <h2>Import aus Quicken (QDATA)</h2>
+      <p>Alle bisherigen Konten, Buchungen und Kategorien aus Quicken sollen übernommen werden. Die Originaldatei wird dabei nur gelesen und nie verändert.</p>
+    </div>
+    <div class="note">
+      <b>Offener Punkt</b>
+      <p>QDATA ist ein nicht offengelegtes Format von Quicken. Ob es sich direkt lesen lässt, zeigt erst eine Kopie deiner Datei. Die Untersuchung läuft lokal, die Datei wird nirgendwo hochgeladen.</p>
+    </div>
+    <div class="paths">
+      <div class="card"><h3>Weg A: QIF-Export <span class="tag">verlässlich</span></h3><p>In Quicken jedes Konto als QIF-Datei exportieren. QIF ist ein offenes Textformat mit Buchungen, Kategorien, Empfängern und Splitbuchungen. Funktioniert sicher, kostet aber einen Export-Schritt pro Konto.</p></div>
+      <div class="card"><h3>Weg B: QDATA direkt <span class="tag">wenn möglich</span></h3><p>Die Datei einfach hochladen, und alles wird in einem Rutsch übernommen. Bequemer, aber nur machbar, wenn sich das Format zuverlässig entschlüsseln lässt.</p></div>
+    </div>
+    <ol class="flow">
+      <li><h3>Hochladen</h3><p>QIF- oder QDATA-Datei im Browser auswählen. Sie bleibt auf deinem Server.</p></li>
+      <li><h3>Vorschau</h3><p>Gefundene Konten, Anzahl Buchungen, Zeitraum und Kategorien prüfen, bevor etwas gespeichert wird.</p></li>
+      <li><h3>Zuordnen</h3><p>Quicken-Kategorien den eigenen zuordnen oder 1:1 übernehmen. Doppelte Buchungen werden erkannt.</p></li>
+      <li><h3>Abgleich</h3><p>Endsaldo jedes Kontos mit dem Saldo in Quicken vergleichen. Abweichungen werden angezeigt.</p></li>
+      <li><h3>Rückgängig</h3><p>Jeder Import lässt sich komplett zurücknehmen, falls etwas nicht stimmt.</p></li>
+    </ol>
+  </section>
+
+  <section>
+    <div class="head">
+      <div class="eyebrow">Auswerten</div>
+      <h2>Berichte und Extras</h2>
+      <p>Ideen für später oder für den besonderen Mehrwert.</p>
+    </div>
+    <div class="grid">
+      <div class="card" data-id="berichte"><h3>Berichte &amp; Diagramme</h3><p>Ausgaben nach Kategorie, Verlauf über 12 Monate, Jahresvergleich, Vermögensentwicklung.</p></div>
+      <div class="card" data-id="steuer"><h3>Steuer-Helfer</h3><p>Buchungen als steuerlich relevant markieren (Werbungskosten, Handwerkerleistungen, Spenden) und zum Jahresende als Liste für die Steuererklärung ausgeben.</p></div>
+      <div class="card" data-id="depot"><h3>Depot &amp; ETFs</h3><p>Wertpapiere, Sparpläne, Dividenden, Kursentwicklung. Freistellungsauftrag im Blick.</p></div>
+      <div class="card" data-id="ki"><h3>KI-Assistent</h3><p>Fragen in normaler Sprache: „Warum war der Oktober so teuer?“ Dazu Vorschläge zum Sparen.</p></div>
+      <div class="card" data-id="haushalt"><h3>Gemeinsamer Haushalt</h3><p>Mehrere Personen, gemeinsame Kosten aufteilen, „wer schuldet wem wie viel“.</p></div>
+      <div class="card" data-id="erinnerungen"><h3>Erinnerungen</h3><p>Rechnung fällig, Budget fast aufgebraucht, ungewöhnlich hohe Abbuchung erkannt.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <div class="eyebrow">Technik</div>
+      <h2>Wo läuft die Software?</h2>
+      <p>Entschieden: auf deinem Unraid-Homeserver. Die anderen Varianten stehen zum Vergleich da.</p>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Variante</th><th>Vorteile</th><th>Nachteile</th><th>Daten liegen</th></tr></thead>
+        <tbody>
+          <tr><td><b>Lokale Web-App</b><br><span class="mono">HTML + JS, im Browser</span></td><td>Schnell gebaut, läuft überall, keine Installation</td><td>Kein Handy-Sync ohne Zusatz, Daten nur in einem Browser</td><td class="yes">Nur auf deinem PC</td></tr>
+          <tr><td><b>Desktop-App</b><br><span class="mono">Python oder Electron + SQLite</span></td><td>Echte Datenbankdatei, gut für Backups in OneDrive, offline</td><td>Nur am PC nutzbar, etwas mehr Aufwand</td><td class="yes">Datei auf deinem PC</td></tr>
+          <tr class="chosen"><td><b>Unraid-Homeserver</b><span class="tag">gewählt</span><br><span class="mono">Docker-Container + SQLite</span></td><td>Von PC und Handy erreichbar, Daten bleiben zu Hause, Installation als Unraid-App</td><td>Absicherung nötig (siehe unten)</td><td class="yes"><span class="mono">/mnt/user/appdata/finanzmanager</span></td></tr>
+          <tr><td><b>Cloud-Web-App</b><br><span class="mono">Hosting + Login</span></td><td>Überall verfügbar, mehrere Nutzer einfach</td><td>Laufende Kosten, Datenschutz, Sicherheit sehr wichtig</td><td>Beim Hoster</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <div class="eyebrow">Sicherheit</div>
+      <h2>So bleiben deine Finanzdaten geschützt</h2>
+      <p>Der Server ist nur für dich da. Alles, was nicht nötig ist, bleibt zu.</p>
+    </div>
+    <div class="grid">
+      <div class="card"><h3>Nicht aus dem Internet erreichbar</h3><p>Keine Portfreigabe im Router. Von unterwegs nur über VPN: das in Unraid eingebaute WireGuard oder das Tailscale-Plugin.</p></div>
+      <div class="card"><h3>Login</h3><p>Passwort mit Argon2-Hash, optional zweiter Faktor per Authenticator-App. Sperre nach mehreren Fehlversuchen, automatische Abmeldung.</p></div>
+      <div class="card"><h3>Verschlüsselt übertragen</h3><p>HTTPS auch im Heimnetz, über einen Reverse Proxy wie Nginx Proxy Manager oder Caddy.</p></div>
+      <div class="card"><h3>Verschlüsselt gespeichert</h3><p>Unraid-Laufwerksverschlüsselung (LUKS) oder eine verschlüsselte Datenbank (SQLCipher).</p></div>
+      <div class="card"><h3>Abgeschotteter Container</h3><p>Läuft nicht als Root, sieht nur seinen eigenen appdata-Ordner und keine anderen Shares.</p></div>
+      <div class="card"><h3>Backups</h3><p>Täglich mit dem Plugin „Appdata Backup“, dazu eine verschlüsselte Kopie außer Haus (z. B. per rclone in die Cloud).</p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="head">
+      <div class="eyebrow">Vorschlag</div>
+      <h2>Erste Version (MVP)</h2>
+    </div>
+    <div class="two">
+      <div class="mvp">
+        <h3>Was ich als Start vorschlagen würde</h3>
+        <ol>
+          <li>Docker-Container für Unraid mit Login, nur über Heimnetz/VPN erreichbar</li>
+          <li>Quicken-Import mit Vorschau und Kontostand-Abgleich</li>
+          <li>Konten anlegen und Salden sehen</li>
+          <li>CSV-Import deiner Bank mit Duplikat-Erkennung</li>
+          <li>Kategorien mit automatischen Regeln</li>
+          <li>Dashboard mit Monatsübersicht und Diagramm</li>
+          <li>Monatsbudgets pro Kategorie</li>
+          <li>Verträge &amp; Abos mit Kündigungsfristen</li>
+          <li>Export und Backup</li>
+        </ol>
+        <p>Alles auf deinem Server, ohne Bankzugangsdaten in der Software. Bankanbindung und Extras kommen in Version 2.</p>
+      </div>
+      <div class="card">
+        <h3>Offene Fragen an dich</h3>
+        <ul class="questions">
+          <li>Welche Quicken-Version nutzt du (z. B. Lexware Quicken 2019)?</li>
+          <li>Kannst du eine Kopie der QDATA-Datei zum Testen bereitstellen?</li>
+          <li>Nutzt du in Quicken Depots, Splitbuchungen oder mehrere Währungen?</li>
+          <li>Nur für dich, oder auch für Partner/Familie (mehrere Logins)?</li>
+          <li>Ist auf Unraid schon WireGuard oder Tailscale eingerichtet?</li>
+          <li>Klassische Budgets oder Umschlag-Methode?</li>
+          <li>Eher schlicht und schnell, oder viele Auswertungen?</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <footer>Stand: 15.11.2026 · Wähle oben die Prioritäten, klicke auf „Auswahl kopieren“ und füge den Text im Chat ein.</footer>
+</div>
+
+<script>
+(function () {
+  var KEY = "finanzmanager-prio";
+  var LABELS = { must: "Muss", should: "Soll", later: "Später" };
+  var state = {};
+  try { state = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; } catch (e) { state = {}; }
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} }
+
+  var cards = document.querySelectorAll(".card[data-id]");
+  cards.forEach(function (card) {
+    var id = card.getAttribute("data-id");
+    var box = document.createElement("div");
+    box.className = "prio";
+    box.setAttribute("role", "group");
+    box.setAttribute("aria-label", "Priorität");
+    ["must", "should", "later"].forEach(function (v) {
+      var b = document.createElement("button");
+      b.type = "button"; b.id = "p-" + id + "-" + v; b.setAttribute("data-v", v); b.textContent = LABELS[v];
+      b.addEventListener("click", function () {
+        state[id] = state[id] === v ? undefined : v;
+        if (!state[id]) delete state[id];
+        save(); render();
+      });
+      box.appendChild(b);
+    });
+    card.appendChild(box);
+  });
+
+  function render() {
+    var c = { must: 0, should: 0, later: 0 };
+    cards.forEach(function (card) {
+      var v = state[card.getAttribute("data-id")];
+      if (v) { card.setAttribute("data-prio", v); c[v]++; } else card.removeAttribute("data-prio");
+      card.querySelectorAll(".prio button").forEach(function (b) {
+        b.setAttribute("aria-pressed", String(b.getAttribute("data-v") === v));
+      });
+    });
+    var open = cards.length - c.must - c.should - c.later;
+    var t = document.getElementById("tally");
+    t.innerHTML =
+      '<span class="pill"><span class="dot d-must"></span>Muss <span class="mono">' + c.must + '</span></span>' +
+      '<span class="pill"><span class="dot d-should"></span>Soll <span class="mono">' + c.should + '</span></span>' +
+      '<span class="pill"><span class="dot d-later"></span>Später <span class="mono">' + c.later + '</span></span>' +
+      '<span class="pill">Noch offen <span class="mono">' + open + '</span></span>' +
+      '<button type="button" id="copy" class="copy">Auswahl kopieren</button>' +
+      '<button type="button" id="reset">Auswahl zurücksetzen</button>' +
+      '<textarea id="copy-text" readonly hidden aria-label="Auswahl als Text"></textarea>';
+    document.getElementById("reset").addEventListener("click", function () { state = {}; save(); render(); });
+    document.getElementById("copy").addEventListener("click", copySelection);
+  }
+
+  function summary() {
+    var groups = { must: [], should: [], later: [], open: [] };
+    cards.forEach(function (card) {
+      var v = state[card.getAttribute("data-id")] || "open";
+      groups[v].push(card.querySelector("h3").textContent);
+    });
+    return "Brainstorming Finanzmanager – meine Prioritäten\n" +
+      "Muss: " + (groups.must.join(", ") || "–") + "\n" +
+      "Soll: " + (groups.should.join(", ") || "–") + "\n" +
+      "Später: " + (groups.later.join(", ") || "–") + "\n" +
+      "Offen: " + (groups.open.join(", ") || "–");
+  }
+  function copySelection() {
+    var text = summary(), ta = document.getElementById("copy-text"), btn = document.getElementById("copy");
+    function fallback() {
+      ta.value = text; ta.hidden = false; ta.focus(); ta.select();
+      btn.textContent = "Text markiert – mit Strg+C kopieren";
+    }
+    try {
+      navigator.clipboard.writeText(text).then(function () {
+        btn.textContent = "Kopiert – jetzt im Chat einfügen";
+      }, fallback);
+    } catch (e) { fallback(); }
+  }
+  render();
+})();
+</script>

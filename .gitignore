@@ -1,0 +1,33 @@
+# Echte Bankdaten, Quicken-Dateien und Exporte gehören nie ins Repository
+import-test/
+*.QDF
+*.qdf
+*.QSD
+*.qsd
+*.QIF
+*.qif
+*.csv
+*.CSV
+*.ofx
+*.sta
+*.mt940
+transactions_*.csv
+finanzmanager-backup*.json
+
+# Laufzeitdaten des Servers (Daten, Sicherungen, FinTS-Zustand)
+data/
+data-local/
+*.bin
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Editor / System
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
