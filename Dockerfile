@@ -12,6 +12,7 @@ WORKDIR /srv
 COPY server/requirements.txt server/requirements.txt
 RUN pip install --no-cache-dir -r server/requirements.txt
 
+COPY VERSION VERSION
 COPY server/ server/
 COPY app/index.html app/index.html
 

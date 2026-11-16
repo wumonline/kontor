@@ -294,6 +294,7 @@ const Server = {
     try { const r = await fetch('api/data', { cache: 'no-store' }); if (!r.ok) throw new Error('HTTP ' + r.status); j = await r.json(); }
     catch (e) { toast('Server erreicht, aber die Daten ließen sich nicht laden: ' + e.message); return; }
     this.ok = true; this.rev = j.rev;
+    fetch('api/backups', { cache: 'no-store' }).then(r => r.ok ? r.json() : null).then(b => { this.backups = b; if (b && location.hash === '#konten') render(); }).catch(() => { });
     if (j.data) { DB = ensureModel(j.data); Store.local(DB); }
     else if (DB.tx.length || Object.keys(DB.accounts).length) { this.queue(DB); toast('Deine Daten aus diesem Browser werden jetzt auf dem Server gespeichert.', null, 8000); }
     updateFoot(); render(); Drop.start();
@@ -3469,6 +3470,7 @@ Views.konten = () => {
     </div>
     ${exportPanel()}
     <div class="panel"><h2>Backup</h2>
+      ${serverBackupInfo()}
       <p class="muted">Speichert alle Daten als JSON-Datei. Damit kannst du sie später auch auf den Unraid-Server übertragen.</p>
       <div class="row"><button id="backup">Backup herunterladen</button>
         <label class="btn" for="restore">Backup wiederherstellen</label><input id="restore" type="file" accept=".json" hidden></div>
@@ -3990,6 +3992,17 @@ function setCategory(id, cat) {
   $('#catlist').innerHTML = allCategories().map(c => `<option value="${esc(c)}">`).join('');
 }
 
+/* Automatische Sicherungen des Servers (Ordner backups neben kontor.json) */
+function serverBackupInfo() {
+  if (!Server.ok) return '';
+  const b = Server.backups, v = Server.info && Server.info.version;
+  const when = name => { const m = /(\d{4})(\d\d)(\d\d)(?:-(\d\d))?/.exec(name || ''); return m ? `${m[3]}.${m[2]}.${m[1]}${m[4] ? ` ${m[4]} Uhr` : ''}` : '–'; };
+  const parts = b ? [
+    `${b.hourly.count} stündliche (letzte ${when(b.hourly.last)})`,
+    `${b.daily.count} tägliche (letzte ${when(b.daily.last)})`,
+    `${b.update.count} vor Updates${b.update.last ? ` (zuletzt vor ${esc(b.update.last.replace(/^kontor-vor-|-\d{8}-\d{6}\.json$/g, ''))})` : ''}`] : [];
+  return `<p class="muted">Kontor ${esc(v || '?')} läuft auf deinem Server. Er sichert die Daten selbst${b ? `: ${parts.join(', ')}` : ''}. Sie liegen im Datenordner unter „backups“.</p>`;
+}
 function downloadBackup() {
   const blob = new Blob([JSON.stringify(DB)], { type: 'application/json' });
   const a = document.createElement('a');
@@ -3999,7 +4012,8 @@ function downloadBackup() {
 }
 async function restoreBackup(file) {
   try {
-    const d = JSON.parse(await file.text());
+    let d = JSON.parse(await file.text());
+    if (d && 'rev' in d && d.data) d = d.data;   // Sicherung des Servers (kontor.json mit rev/saved/data)
     if (!d || d.version !== 1 || !Array.isArray(d.tx) || typeof d.accounts !== 'object') throw new Error('Unbekanntes Format');
     DB = ensureModel(d); save(); UI.year = null; toast(`Backup mit ${d.tx.length} Buchungen wiederhergestellt.`); location.hash = 'uebersicht'; render();
   } catch (err) { toast('Backup konnte nicht gelesen werden: ' + err.message); }

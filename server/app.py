@@ -11,6 +11,10 @@ Umgebungsvariablen:
   APP_PASSWORD      wenn gesetzt: Anmeldung per Browser-Dialog (Benutzername beliebig)
   FINTS_PRODUCT_ID  bei der Deutschen Kreditwirtschaft registrierte Produkt-ID
   BACKUP_KEEP       Anzahl stündlicher Sicherungen (Standard 72)
+  BACKUP_DAYS       Anzahl täglicher Sicherungen (Standard 30)
+
+Sicherungen in DATA_DIR/backups: stündlich und täglich beim Speichern, dazu bei jedem
+Start mit einer neuen Version (kontor-vor-<version>-<zeit>.json, die letzten 10 bleiben).
 """
 import base64
 import hmac
@@ -29,14 +33,29 @@ import drop
 import fints_session
 import quotes
 
-VERSION = '0.2.0'
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _version():
+    """Die Versionsnummer steht in der Datei VERSION im Hauptordner (im Container neben server/)."""
+    for p in (os.path.join(HERE, '..', 'VERSION'), os.path.join(HERE, 'VERSION')):
+        try:
+            with open(p, encoding='utf-8') as f:
+                return f.read().strip()
+        except OSError:
+            pass
+    return 'unbekannt'
+
+
+VERSION = _version()
 PORT = int(os.environ.get('PORT', '8080'))
 HOST = os.environ.get('HOST', '0.0.0.0')   # 127.0.0.1 = nur von diesem Rechner erreichbar
 DATA_DIR = os.path.abspath(os.environ.get('DATA_DIR', '/data'))
 APP_DIR = os.path.abspath(os.environ.get('APP_DIR', os.path.join(HERE, '..', 'app')))
 PASSWORD = os.environ.get('APP_PASSWORD', '')
 BACKUP_KEEP = int(os.environ.get('BACKUP_KEEP', '72'))
+BACKUP_DAYS = int(os.environ.get('BACKUP_DAYS', '30'))
+UPDATE_KEEP = 10
 MAX_BODY = 64 * 1024 * 1024
 
 DATA_FILE = os.path.join(DATA_DIR, 'kontor.json')
@@ -70,22 +89,73 @@ def write_store(store):
     os.replace(tmp, DATA_FILE)
 
 
-def backup_if_due():
-    """Höchstens eine Sicherung pro Stunde, die ältesten über BACKUP_KEEP werden gelöscht."""
+BACKUP_KINDS = {
+    # Art: (Ordner, Erkennung am Dateinamen, wie viele bleiben)
+    'hourly': (BACKUP_DIR, lambda f: f.startswith('kontor-') and f[7:8].isdigit(), lambda: BACKUP_KEEP),
+    'daily': (os.path.join(BACKUP_DIR, 'taeglich'), lambda f: f.startswith('kontor-'), lambda: BACKUP_DAYS),
+    'update': (BACKUP_DIR, lambda f: f.startswith('kontor-vor-'), lambda: UPDATE_KEEP),
+}
+
+
+def backup_files(kind):
+    folder, match, _ = BACKUP_KINDS[kind]
+    try:
+        files = [f for f in os.listdir(folder) if f.endswith('.json') and match(f)]
+    except FileNotFoundError:
+        return []
+    # Sicherungen nach Versionswechseln sind nach Version benannt, nicht nach Zeit: nach Alter sortieren
+    return sorted(files, key=(lambda f: os.path.getmtime(os.path.join(folder, f))) if kind == 'update' else None)
+
+
+def backup_copy(kind, name):
+    """Kopie anlegen (falls noch nicht vorhanden) und die ältesten über dem Limit löschen."""
     if not os.path.exists(DATA_FILE):
         return
-    os.makedirs(BACKUP_DIR, exist_ok=True)
-    name = f'kontor-{datetime.now():%Y%m%d-%H}.json'
-    target = os.path.join(BACKUP_DIR, name)
+    folder, _, keep = BACKUP_KINDS[kind]
+    os.makedirs(folder, exist_ok=True)
+    target = os.path.join(folder, name)
     if os.path.exists(target):
         return
     shutil.copy2(DATA_FILE, target)
-    files = sorted(f for f in os.listdir(BACKUP_DIR) if f.startswith('kontor-') and f.endswith('.json'))
-    for old in files[:-BACKUP_KEEP]:
+    for old in backup_files(kind)[:-keep()]:
         try:
-            os.remove(os.path.join(BACKUP_DIR, old))
+            os.remove(os.path.join(folder, old))
         except OSError:
             pass
+
+
+def backup_if_due():
+    """Vor dem Speichern: höchstens eine Sicherung pro Stunde und eine pro Tag."""
+    now = datetime.now()
+    backup_copy('hourly', f'kontor-{now:%Y%m%d-%H}.json')
+    backup_copy('daily', f'kontor-{now:%Y%m%d}.json')
+
+
+def backup_on_version_change():
+    """Beim ersten Start einer neuen Version den Stand davor sichern."""
+    marker = os.path.join(DATA_DIR, 'version.txt')
+    try:
+        with open(marker, encoding='utf-8') as f:
+            last = f.read().strip()
+    except OSError:
+        last = ''
+    if last == VERSION:
+        return
+    if os.path.exists(DATA_FILE):
+        name = f'kontor-vor-{VERSION}-{datetime.now():%Y%m%d-%H%M%S}.json'
+        backup_copy('update', name)
+        log(f'Version {last or "?"} -> {VERSION}, Sicherung {name}')
+    with open(marker, 'w', encoding='utf-8') as f:
+        f.write(VERSION)
+
+
+def backup_overview():
+    out = {'dir': BACKUP_DIR}
+    for kind in BACKUP_KINDS:
+        files = backup_files(kind)
+        out[kind] = {'count': len(files), 'last': files[-1] if files else None}
+    out['update']['files'] = backup_files('update')
+    return out
 
 
 # ---------- HTTP ----------
@@ -156,6 +226,8 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 store = read_store()
             return self.send_json(200, store)
+        if path == '/api/backups':
+            return self.send_json(200, backup_overview())
         if path.startswith('/api/fints/'):
             s = fints_session.get(path.rsplit('/', 1)[-1])
             return self.send_json(200, s.public()) if s else self.send_json(404, {'error': 'Abruf nicht gefunden oder abgelaufen.'})
@@ -310,6 +382,7 @@ def main():
     if not os.path.exists(DATA_FILE) and os.path.exists(OLD_DATA_FILE):
         os.replace(OLD_DATA_FILE, DATA_FILE)
         log('Datendatei finanzmanager.json in kontor.json umbenannt')
+    backup_on_version_change()
     if not os.path.isfile(os.path.join(APP_DIR, 'index.html')):
         log(f'index.html nicht gefunden in {APP_DIR}')
         sys.exit(1)

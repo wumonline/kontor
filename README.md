@@ -13,7 +13,7 @@ Verträge und Abos, Kredite, Depot mit aktuellen Kursen. Die Daten bleiben auf d
 - **Verträge und Abos** mit Kündigungsfristen, Erkennung aus wiederkehrenden Zahlungen
 - **Kredite** mit Tilgungsplan und Sondertilgung
 - **Depot** mit Positionen, Einstand, aktuellem Kurs (über onvista, es wird nur die ISIN übertragen) und Gewinn/Verlust
-- **Backup** als JSON, stündliche Sicherungen auf dem Server
+- **Backup** als JSON, stündliche, tägliche und Sicherungen vor jedem Update auf dem Server
 
 ## Aufbau
 

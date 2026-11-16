@@ -22,10 +22,10 @@ Im Unraid-Terminal (oben rechts `>_`):
 
 ```bash
 cd /mnt/user/appdata/kontor-src
-docker build -t kontor:latest .
+docker build -t kontor:latest -t kontor:$(cat VERSION) .
 ```
 
-Nach jedem Update der App-Dateien diesen Befehl wiederholen und den Container neu starten.
+Für spätere Updates siehe [Updates und Versionen](#updates-und-versionen).
 
 ## 3. Container anlegen
 
@@ -108,7 +108,32 @@ PDFs müssen echten Text enthalten. Eingescannte Auszüge ohne Texterkennung lan
 - Zwischen Browser und Server läuft die PIN unverschlüsselt über HTTP, solange kein HTTPS davor sitzt.
   Im eigenen Netz ist das vertretbar; mit einem Reverse Proxy (z. B. Nginx Proxy Manager) und HTTPS ist es besser.
 
+## Updates und Versionen
+
+Die laufende Version steht in Kontor unter **Konten & Daten → Backup**. Die Versionsnummer steht in der Datei
+`VERSION`; jede Version ist auf GitHub als Tag markiert (z. B. `v0.3.0`), mit einer Notiz unter **Releases**.
+
+Update im Unraid-Terminal:
+
+```bash
+cd /mnt/user/appdata/kontor-src && curl -fsSL https://github.com/wumonline/kontor/archive/refs/heads/main.tar.gz | tar xz --strip-components=1 && docker build -t kontor:latest -t kontor:$(cat VERSION) .
+```
+
+Danach den Container **neu anlegen**, nicht nur neu starten (ein Neustart behält das alte Image):
+Docker → Kontor → **Edit** → **Apply**. Ist Apply ausgegraut, ein Feld kurz ändern und zurücksetzen.
+
+Zurück zu einer früheren Version: Docker → Kontor → **Edit**, bei **Repository** statt `kontor:latest`
+z. B. `kontor:0.3.0` eintragen → **Apply**. `docker images kontor` zeigt, welche Versionen vorhanden sind.
+Alte Images löschen mit `docker rmi kontor:0.3.0`.
+
 ## Sicherungen
 
-Der Server legt stündlich eine Kopie in `appdata/kontor/backups` ab und behält die letzten 72.
+Der Server sichert `kontor.json` selbst nach `appdata/kontor/backups`:
+
+- stündlich beim Speichern, die letzten 72 bleiben (`BACKUP_KEEP`),
+- täglich in `backups/taeglich`, die letzten 30 bleiben (`BACKUP_DAYS`),
+- beim ersten Start einer neuen Version als `kontor-vor-<version>-<zeit>.json`, die letzten 10 bleiben.
+
+Wiederherstellen: Container stoppen, die gewünschte Sicherung als `kontor.json` nach `appdata/kontor` kopieren,
+Container starten. Oder die Datei in Kontor über **Backup wiederherstellen** laden.
 Den `appdata`-Ordner zusätzlich mit dem Unraid-Plugin „Appdata Backup“ sichern.
