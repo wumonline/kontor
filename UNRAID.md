@@ -4,10 +4,17 @@ Der Container liefert die App aus, speichert alle Daten in `/mnt/user/appdata/fi
 und ruft Umsätze per FinTS bei der Bank ab. Es werden keine Daten an Dritte geschickt,
 nur an deine Bank. Die PIN wird nie gespeichert.
 
-## 1. Dateien auf den Server kopieren
+## 1. Code auf den Server holen
 
-Diesen Ordner `finanzmanager` (mit `app`, `server`, `unraid`, `Dockerfile`) auf eine Freigabe kopieren,
-zum Beispiel nach `/mnt/user/appdata/finanzmanager-src`. Der Ordner `import-test` wird nicht gebraucht.
+Im Unraid-Terminal (oben rechts `>_`):
+
+```bash
+git clone https://github.com/wumonline/finanzmanager.git /mnt/user/appdata/finanzmanager-src
+```
+
+Später aktualisieren mit `cd /mnt/user/appdata/finanzmanager-src && git pull`, danach Schritt 2 wiederholen.
+
+Ohne Git: auf GitHub unter **Code → Download ZIP** herunterladen und nach `/mnt/user/appdata/finanzmanager-src` entpacken.
 
 ## 2. Image bauen
 
