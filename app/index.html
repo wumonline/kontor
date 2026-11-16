@@ -2169,6 +2169,20 @@ function trOldImports(st) {
   const tx = DB.tx.filter(t => t.imp && ids.has(t.imp) && !String(t.key || '').startsWith('tr|'));
   return { ids, tx, accts: [...new Set(tx.map(t => t.acct))] };
 }
+/* Buchungen aus anderen Quellen (QIF, normale CSV, von Hand) im Zeitraum der Datei: Die Datei ist dort vollständig,
+   sie wären also doppelt. Beim automatischen Import nur die, zu denen die Datei eine passende Buchung hat. */
+function trOverlap(st, cashT, depT, matchedOnly) {
+  const plan = trPlan(st), dates = plan.tx.map(t => t.date).sort(); if (!dates.length) return [];
+  const oldIds = new Set(st.tr.dropOld ? trOldImports(st).tx.map(t => t.id) : []), from = dates[0], to = dates[dates.length - 1];
+  const l = DB.tx.filter(t => (t.acct === cashT || t.acct === depT) && !String(t.key || '').startsWith('tr|') && !t.gen && !oldIds.has(t.id) && t.date >= from && t.date <= to);
+  if (!matchedOnly) return l;
+  const pool = plan.tx.filter(p => p.side === 'cash');
+  return l.filter(t => {
+    if (t.acct !== cashT) return false;
+    const i = pool.findIndex(p => p.amount === t.amount && Math.abs(daysBetween(p.date, t.date)) <= 4);
+    if (i < 0) return false; pool.splice(i, 1); return true;
+  });
+}
 function trInit(st) {
   const accts = Object.values(DB.accounts), isTR = a => /trade ?republic|\btr\b/i.test(a.name) || a.institute === 'traderepublic';
   const old = trOldImports(st);
@@ -2189,6 +2203,7 @@ function trPanel() {
     .map(a => `<option value="${esc(a.name)}" ${a.name === cur ? 'selected' : ''}>${esc(a.name)} · ${esc(acctType(a.type))}</option>`).join('')}
     <option value="__new" ${cur === '__new' ? 'selected' : ''}>＋ Neues ${wantDepot ? 'Depot' : 'Konto'} anlegen</option></select>`;
   const same = cashT && cashT === depT;
+  const ovl = same ? [] : trOverlap(st, cashT, depT, false);
   const show = plan.tx.slice(-12).reverse();
   return `<div class="panel csvflow">
     <div class="row spread"><h2>Trade Republic importieren</h2><span class="chip ok">Format erkannt</span></div>
@@ -2206,6 +2221,7 @@ function trPanel() {
       </div>
       ${same ? '<p class="neg">Cash-Konto und Depot müssen verschieden sein.</p>' : ''}
       ${old.tx.length ? `<label class="row"><input type="checkbox" id="tr-dropold" ${o.dropOld ? 'checked' : ''}> <span>Den früheren Import dieser Datei ersetzen: ${old.tx.length} Buchungen in „${old.accts.map(esc).join('“, „')}“ werden entfernt.${old.accts.some(a => a !== cashT && a !== depT) ? ' Umbuchungen, die dorthin zeigen, werden auf das neue Cash-Konto umgestellt.' : ''}</span></label>` : ''}
+      ${ovl.length ? `<label class="row"><input type="checkbox" id="tr-dropovl" ${o.dropOvl !== false ? 'checked' : ''}> <span>${ovl.length} Buchungen aus anderen Importen (z. B. Quicken oder normale CSV) liegen im Zeitraum der Datei und wären doppelt. Ersetzen; Kategorien und Tags gehen auf die passende neue Buchung über.</span></label>` : ''}
     </section>
     <section class="step-box"><h3 class="step">3 · Prüfen und importieren</h3>
       <p><b>${cash.length}</b> Buchungen in „${esc(cashT)}“ (Summe ${money(sum(cash))}), <b>${dep.length}</b> in „${esc(depT)}“ (Summe ${money(sum(dep))}).${skip ? ` ${skip} sind schon importiert und werden übersprungen.` : ''}</p>
@@ -2216,7 +2232,7 @@ function trPanel() {
       </tbody></table></div>
       <p class="muted">Die neuesten 12 von ${plan.tx.length}.</p>
       <label class="row"><input type="checkbox" id="csv-archive" ${st.archive !== false ? 'checked' : ''}> <span>Datei beim Cash-Konto bei den Kontoauszügen ablegen</span></label>
-      <div class="row"><button class="primary" id="tr-go" ${fresh.length && !same && cashT && depT ? '' : 'disabled'}>${fresh.length} Buchungen importieren</button><button id="csv-cancel">Abbrechen</button></div>
+      <div class="row"><button class="primary" id="tr-go" ${(fresh.length || (ovl.length && o.dropOvl !== false)) && !same && cashT && depT ? '' : 'disabled'}>${fresh.length || !ovl.length || o.dropOvl === false ? `${fresh.length} Buchungen importieren` : `${ovl.length} doppelte Buchungen ersetzen`}</button><button id="csv-cancel">Abbrechen</button></div>
     </section></div>`;
 }
 async function commitTR(stArg, opts = {}) {
@@ -2247,6 +2263,16 @@ async function commitTR(stArg, opts = {}) {
     for (const x of DB.tx) if (!gone.has(x.id) && old.accts.includes(x.transfer) && !old.accts.includes(x.acct) && x.acct !== depA && (!x.link || gone.has(x.link))) { x.transfer = cashA; delete x.link; }
     DB.tx = DB.tx.filter(t => !gone.has(t.id)); removed = old.tx.length;
   }
+  // Doppelte aus anderen Quellen im Zeitraum der Datei entfernen; ihre Kategorien werden unten übernommen
+  const ovl = o.dropOvl === false ? [] : trOverlap(st, cashA, depA, !!opts.auto);
+  if (ovl.length) {
+    const gone = new Set(ovl.map(t => t.id));
+    for (const t of ovl) {
+      const other = t.link ? DB.tx.find(x => x.id === t.link) : null;
+      if (other && !gone.has(other.id)) { if (other.gen) gone.add(other.id); else delete other.link; }
+    }
+    DB.tx = DB.tx.filter(t => !gone.has(t.id));
+  }
   const plan = trPlan(st), keys = new Set(DB.tx.map(t => t.key)), impId = 'i' + Date.now(), byIdx = {}, added = [];
   plan.tx.forEach((t, i) => {
     if (keys.has(t.key)) return;
@@ -2264,6 +2290,14 @@ async function commitTR(stArg, opts = {}) {
     if (!src) continue;
     src.link = n.id; n.transfer = src.acct; n.link = src.id; n.category = ''; relinked++;
   }
+  const taken = new Set(), trTx = DB.tx.filter(n => String(n.key || '').startsWith('tr|'));
+  for (const r of ovl.filter(r => (r.category && !r.transfer) || (r.tags || []).length)) {
+    const fits = n => !taken.has(n.id) && n.acct === r.acct && n.amount === r.amount && !n.transfer && Math.abs(daysBetween(n.date, r.date)) <= 4;
+    const n = trTx.find(n => fits(n) && !n.category) || trTx.find(fits);
+    if (!n) continue; taken.add(n.id);
+    if (r.category && !r.transfer && !n.category) n.category = r.category;
+    if ((r.tags || []).length) n.tags = [...new Set([...(n.tags || []), ...r.tags])];
+  }
   const merged = dedupeTransfers(DB);
   const ruled = applyRules(added.filter(n => !n.transfer && !n.category)).length;
   DB.tx.sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
@@ -2271,7 +2305,7 @@ async function commitTR(stArg, opts = {}) {
   await archiveImported(st, cashA);
   const empty = old.accts.filter(a => a !== cashA && a !== depA && DB.accounts[a] && !DB.tx.some(t => t.acct === a));
   if (UI.csv === st) UI.csv = null; save();
-  const msg = `${added.filter(t => t.acct === cashA).length} Buchungen in „${cashA}“ und ${added.filter(t => t.acct === depA).length} in „${depA}“ importiert${removed ? `, ${removed} vom früheren Import ersetzt` : ''}${relinked + merged ? `, ${relinked + merged} Umbuchungen verknüpft` : ''}${ruled ? `, ${ruled} per Regel zugeordnet` : ''}.${empty.length ? ` „${empty.join('“, „')}“ ist jetzt leer und kann unter Konten & Daten gelöscht werden.` : ''}`;
+  const msg = `${added.filter(t => t.acct === cashA).length} Buchungen in „${cashA}“ und ${added.filter(t => t.acct === depA).length} in „${depA}“ importiert${removed ? `, ${removed} vom früheren Import ersetzt` : ''}${ovl.length ? `, ${ovl.length} doppelte aus anderen Importen ersetzt` : ''}${relinked + merged ? `, ${relinked + merged} Umbuchungen verknüpft` : ''}${ruled ? `, ${ruled} per Regel zugeordnet` : ''}.${empty.length ? ` „${empty.join('“, „')}“ ist jetzt leer und kann unter Konten & Daten gelöscht werden.` : ''}`;
   if (opts.auto) return msg;
   UI.f = Object.assign(NOFILTER(), { acct: cashA }); location.hash = 'buchungen'; render();
   toast(msg, { label: 'Rückgängig', run: () => { DB = JSON.parse(snap); save(); render(); toast('Import rückgängig gemacht.'); } }, 12000);
@@ -3580,6 +3614,7 @@ document.addEventListener('change', e => {
   else if (t.id === 'tr-cashname') { UI.csv.tr.cashName = t.value; render(); }
   else if (t.id === 'tr-depotname') { UI.csv.tr.depotName = t.value; render(); }
   else if (t.id === 'tr-dropold') { UI.csv.tr.dropOld = t.checked; render(); }
+  else if (t.id === 'tr-dropovl') { UI.csv.tr.dropOvl = t.checked; render(); }
   else if (t.id === 'hold-acct') { UI.csv.hold.acct = t.value; render(); }
   else if (t.id === 'hold-name') { UI.csv.hold.newName = t.value; }
   else if (t.id === 'csv-newname') { UI.csv.newName = t.value; }
