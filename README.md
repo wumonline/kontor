@@ -1,6 +1,6 @@
-# Finanzmanager
+# Kontor
 
-Persönlicher Finanzmanager für den eigenen Server (Unraid/Docker): Konten, Buchungen, Kategorien und Regeln,
+Persönliche Finanzverwaltung für den eigenen Server (Unraid/Docker): Konten, Buchungen, Kategorien und Regeln,
 Verträge und Abos, Kredite, Depot mit aktuellen Kursen. Die Daten bleiben auf dem eigenen Server.
 
 ## Funktionen

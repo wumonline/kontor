@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Finanzmanager</title>
+<title>Kontor</title>
 <style>
 /* Layout: feste Navigationsleiste links (auf dem Handy oben), rechts die jeweilige Ansicht.
    Keine externen Schriften oder Skripte: eine Finanz-App soll keine Anfragen ins Internet schicken. */
@@ -240,7 +240,7 @@ button.icon.play:disabled { color: var(--muted); border-color: var(--line); }
 <body>
 <div class="app">
   <aside class="nav">
-    <div class="brand">Finanzmanager<small>v0.1</small></div>
+    <div class="brand">Kontor<small>v0.1</small></div>
     <nav id="nav">
       <a href="#uebersicht">Übersicht</a>
       <a href="#buchungen">Buchungen</a>
@@ -249,7 +249,7 @@ button.icon.play:disabled { color: var(--muted); border-color: var(--line); }
       <a href="#vertraege">Verträge &amp; Abos <span class="badge" id="co-badge" hidden></span></a>
       <a href="#depot">Depot</a>
       <a href="#kredite">Kredite &amp; Schulden</a>
-      <a href="#import">Import</a>
+      <a href="#import">Import <span class="badge" id="in-badge" hidden></span></a>
       <a href="#konten">Konten &amp; Daten</a>
     </nav>
     <div class="foot">Prototyp. Daten bleiben in diesem Browser.</div>
@@ -279,7 +279,7 @@ const acctType = t => ACCT_TYPES[t] || t || '–';
 /* ---------- Speicher ----------
    Im Prototyp lokal im Browser. Für Unraid wird dieses Objekt durch Aufrufe an die Server-API ersetzt. */
 /* ---------- Server (Unraid-Container) ----------
-   Wird die App vom Finanzmanager-Server geladen, liegen die Daten dort. localStorage bleibt Zwischenspeicher.
+   Wird die App vom Kontor-Server geladen, liegen die Daten dort. localStorage bleibt Zwischenspeicher.
    Ohne Server (Datei direkt geöffnet) läuft alles wie bisher nur im Browser.
    Konflikte: Jeder Stand hat eine Nummer (rev). Hat ein anderes Gerät inzwischen gespeichert, lehnt der Server ab. */
 const Server = {
@@ -296,7 +296,7 @@ const Server = {
     this.ok = true; this.rev = j.rev;
     if (j.data) { DB = ensureModel(j.data); Store.local(DB); }
     else if (DB.tx.length || Object.keys(DB.accounts).length) { this.queue(DB); toast('Deine Daten aus diesem Browser werden jetzt auf dem Server gespeichert.', null, 8000); }
-    updateFoot(); render();
+    updateFoot(); render(); Drop.start();
   },
   queue(d) {
     if (!this.ok || this.conflict) return;
@@ -1656,7 +1656,7 @@ function csvText(x, format) {
 function downloadCSV(x, format) {
   const blob = new Blob(['﻿' + csvText(x, format)], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = `finanzmanager-${x.name}-${TODAY}.csv`;
+  a.href = URL.createObjectURL(blob); a.download = `kontor-${x.name}-${TODAY}.csv`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   toast(`${x.rows.length} Zeilen exportiert.`);
@@ -1814,22 +1814,42 @@ function suggestCsvAcct(st) {
   }
   return null;
 }
-async function readCSVFile(file, buf) {
+/* Liest eine CSV und schlägt das Konto vor. Gibt null zurück, wenn keine Zeilen drin sind. */
+function csvState(name, buf, size) {
   const text = QIF.decode(buf).replace(/^﻿/, '');
   const { sep, rows } = parseCSV(text);
-  if (rows.length < 2) { toast(`In ${file.name} wurden keine Zeilen gefunden.`); return nextCsv(); }
+  if (rows.length < 2) return null;
   const headerIdx = findHeader(rows), head = rows[headerIdx];
   const sig = head.join('|'), saved = (DB.csvMaps || {})[sig];
-  UI.pending = null;
-  const st = { file: file.name, text, sep, rows, headerIdx, map: saved ? Object.assign({}, saved.map) : guessMap(head),
-    acct: '', skipDup: true, remembered: !!saved, size: file.size, meta: csvMeta(rows, headerIdx), saveIban: true, newType: 'Bank' };
-  st.newName = st.meta.name || file.name.replace(/\.[^.]+$/, '');
+  const st = { file: name, text, sep, rows, headerIdx, map: saved ? Object.assign({}, saved.map) : guessMap(head),
+    acct: '', skipDup: true, remembered: !!saved, size, meta: csvMeta(rows, headerIdx), saveIban: true, newType: 'Bank' };
+  st.newName = st.meta.name || name.replace(/\.[^.]+$/, '');
   if (/kredit|darlehen/i.test(st.meta.name)) st.newType = 'Oth L';
-  if (isTRHead(rows[0])) { st.headerIdx = 0; trInit(st); UI.csv = st; return location.hash === '#import' ? render() : (location.hash = 'import'); }
-  st.suggestion = suggestCsvAcct(st);
+  if (isTRHead(rows[0])) { st.headerIdx = 0; trInit(st); return st; }
+  if (holdingsState(st)) return st;
+  st.suggestion = suggestCsvAcct(st) || acctFromFileName(name);
   if (st.suggestion) st.acct = st.suggestion.acct;
-  UI.csv = st;
+  return st;
+}
+/* Viele Banken schreiben die Kontonummer in den Dateinamen, z. B. „Kontoumsaetze_395_6313035_00_…“ */
+function acctFromFileName(name) {
+  const digits = name.match(/\d{6,}/g) || [], hits = Object.values(DB.accounts).filter(a => {
+    const n = String(a.number || '').replace(/\D/g, '').replace(/^0+/, ''), ib = ibanKey(a.iban);
+    return (n.length >= 6 && digits.some(d => d.replace(/^0+/, '') === n || d.endsWith(n))) || (ib && name.toUpperCase().replace(/[\s_-]/g, '').includes(ib));
+  });
+  return hits.length === 1 ? { acct: hits[0].name, why: 'Die Kontonummer steht im Dateinamen.', strong: true } : null;
+}
+async function readCSVFile(file, buf, drop) {
+  const st = csvState(file.name, buf, file.size);
+  if (!st) { toast(`In ${file.name} wurden keine Zeilen gefunden.`); return nextCsv(); }
+  if (drop) st.drop = drop;
+  UI.pending = null; UI.csv = st;
   location.hash === '#import' ? render() : (location.hash = 'import');
+}
+/* Nach dem Import: Datei unter dem Konto ablegen. Aus dem Eingangsordner wird sie auf dem Server verschoben. */
+async function archiveImported(st, acct) {
+  if (st.drop) { const r = await Drop.archive(st.drop.box, st.drop.name, acct, 'csv'); Drop.api('drop').then(s => { Drop.state = s; updateBadges(); if (location.hash === '#import') render(); }).catch(() => { }); return r; }
+  if (st.archive !== false) return addStatement(acct, new File([st.text], st.file, { type: 'text/csv' }), 'csv');
 }
 function nextCsv() {
   const q = UI.csvQueue || [];
@@ -1936,8 +1956,8 @@ function csvPanel() {
     </section>
   </div>`;
 }
-async function commitCSV() {
-  const st = UI.csv; if (!st || !st.acct) return;
+async function commitCSV(stArg, opts = {}) {
+  const st = stArg || UI.csv; if (!st || !st.acct) return;
   if (st.acct === '__new') {
     const name = (st.newName || '').trim();
     if (!name) return toast('Bitte einen Namen für das neue Konto eingeben.');
@@ -1992,9 +2012,10 @@ async function commitCSV() {
   DB.tx.sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
   DB.csvMaps = DB.csvMaps || {}; DB.csvMaps[(st.rows[st.headerIdx] || []).join('|')] = { map: st.map };
   DB.imports.push({ id: impId, file: st.file, date: new Date().toISOString(), count: added.length });
-  if (st.archive !== false) await addStatement(st.acct, new File([st.text], st.file, { type: 'text/csv' }), 'csv');
-  const acct = st.acct; UI.csv = null; save();
+  await archiveImported(st, st.acct);
+  const acct = st.acct; if (UI.csv === st) UI.csv = null; save();
   const msg = `${added.length} Buchungen in „${acct}“ importiert${removedN ? `, ${removedN} alte ersetzt` : ''}${relinked ? `, ${relinked} Umbuchungen zugeordnet` : ''}${upgraded + merged ? `, ${upgraded + merged} Umbuchungen mit vorhandenen Gegenbuchungen abgeglichen` : ''}${ruled ? `, ${ruled} per Regel zugeordnet` : ''}.`;
+  if (opts.auto) return msg;
   if (nextCsv()) { toast(msg + ' Weiter mit der nächsten Datei.', null, 9000); return; }
   UI.f = Object.assign(NOFILTER(), { acct }); location.hash = 'buchungen'; render();
   toast(msg, null, 9000);
@@ -2055,6 +2076,93 @@ function trPlan(st) {
   const open = Object.values(pos).filter(p => p.shares > 0 || p.cost > 0);
   return { tx: out, open };
 }
+/* ---------- Depotbestand (z. B. ING „Depotübersicht“) ----------
+   Keine Bewegungen, sondern der Bestand an einem Stichtag. Neue Positionen werden als Anfangsbestand eingebucht
+   (zählt nicht als Ausgabe), bei bekannten wird die Stückzahl an den Bestand laut Bank angeglichen. */
+function holdingsState(st) {
+  const rows = st.rows, hi = rows.findIndex(r => r.includes('ISIN') && r.some(c => /^Stück/i.test(c)));
+  if (hi < 0) return false;
+  const head = rows[hi], col = re => head.findIndex(h => re.test(h));
+  const c = { isin: col(/^ISIN$/), name: col(/wertpapiername|bezeichnung|name/i), shares: col(/^Stück/i), costPx: col(/einstandskurs/i), cost: col(/einstandswert/i),
+    px: col(/bewertungskurs|aktueller kurs|^kurs$/i), value: col(/^kurswert/i), time: col(/^zeit$/i), market: col(/handelsplatz|börse/i) };
+  if (c.isin < 0 || c.shares < 0) return false;
+  const num = s => { s = String(s || '').trim(); if (!s || /n\.?a\.?/i.test(s)) return null; const v = parseFloat(s.replace(/\./g, '').replace(',', '.')); return isNaN(v) ? null : v; };
+  const pre = rows.slice(0, hi).map(r => r.join(' ')).join(' ');
+  const dm = pre.match(/(\d{1,2})\.(\d{1,2})\.(20\d\d)/), date = dm ? `${dm[3]}-${dm[2].padStart(2, '0')}-${dm[1].padStart(2, '0')}` : TODAY;
+  const nm = pre.match(/Depot(?:nummer|-Nr\.?)?\D{0,3}(\d{6,})/i) || st.file.match(/(\d{8,})/);
+  const pos = rows.slice(hi + 1).filter(r => /^[A-Z]{2}[A-Z0-9]{9}\d$/.test((r[c.isin] || '').trim())).map(r => {
+    const value = num(r[c.value]), costRaw = num(r[c.cost]);
+    return { isin: r[c.isin].trim(), name: (r[c.name] || '').replace(/\s+/g, ' ').trim(), shares: num(r[c.shares]) || 0,
+      cost: costRaw != null ? Math.round(costRaw * 100) : value != null ? Math.round(value * 100) : 0, costUnknown: costRaw == null,
+      price: num(r[c.px]), value: value != null ? Math.round(value * 100) : null, market: c.market >= 0 ? r[c.market] : '' };
+  });
+  if (!pos.length) return false;
+  const number = nm ? nm[1] : '';
+  const acc = Object.values(DB.accounts).find(a => number && String(a.number || '').replace(/\D/g, '').replace(/^0+/, '') === number.replace(/^0+/, ''));
+  st.hold = { date, number, pos, acct: acc ? acc.name : '__new', newName: /ing/i.test(st.file + pre) ? 'ING Depot' : 'Depot ' + number, strong: !!acc };
+  return true;
+}
+/* Was beim Übernehmen je Position passiert */
+function holdPlan(st) {
+  const h = st.hold, acct = h.acct === '__new' ? null : h.acct, have = acct ? depotPositions(acct) : [];
+  return h.pos.map(p => {
+    const cur = have.find(x => x.isin === p.isin && x.open);
+    if (!cur) return Object.assign({ act: 'new' }, p);
+    if (Math.abs(cur.held - p.shares) < 1e-6) return Object.assign({ act: 'same', had: cur.held }, p);
+    return Object.assign({ act: 'fix', had: cur.held }, p);
+  });
+}
+function holdPanel() {
+  const st = UI.csv, h = st.hold, plan = holdPlan(st);
+  const accts = Object.values(DB.accounts).filter(a => !loanOfAcct(a.name)).sort((a, b) => a.name.localeCompare(b.name, 'de'));
+  const label = { new: 'wird eingebucht', fix: 'Stückzahl angleichen', same: 'stimmt' };
+  return `<div class="panel csvflow">
+    <div class="row spread"><h2>Depotbestand importieren</h2><span class="chip ok">Depotübersicht erkannt</span></div>
+    <p class="muted">Die Datei enthält den Bestand am ${dDE(h.date)}${h.number ? ` für Depot ${esc(h.number)}` : ''}, keine Käufe oder Verkäufe. Neue Positionen werden zum Einstandswert als Anfangsbestand eingebucht, das zählt nicht als Ausgabe.</p>
+    <div class="form"><label class="field"><span>Depot in der App</span><select id="hold-acct">${accts.map(a => `<option value="${esc(a.name)}" ${a.name === h.acct ? 'selected' : ''}>${esc(a.name)} · ${esc(acctType(a.type))}</option>`).join('')}<option value="__new" ${h.acct === '__new' ? 'selected' : ''}>＋ Neues Depot anlegen</option></select></label>
+      ${h.acct === '__new' ? `<label class="field"><span>Name des neuen Depots</span><input type="text" id="hold-name" value="${esc(h.newName)}"></label>` : ''}</div>
+    <div class="table-wrap"><table><thead><tr><th>Wertpapier</th><th class="r">Stück</th><th class="r">Einstand</th><th class="r">Kurs</th><th class="r">Kurswert</th><th>Aktion</th></tr></thead><tbody>
+      ${plan.map(p => `<tr><td><b>${esc(p.name)}</b><span class="sub num">${esc(p.isin)}</span></td><td class="r num">${fmtShares(p.shares)}${p.act === 'fix' ? `<span class="sub">in der App ${fmtShares(p.had)}</span>` : ''}</td>
+        <td class="r num">${money(p.cost)}${p.costUnknown ? '<span class="sub warn-t">Einstand fehlt, Kurswert genommen</span>' : ''}</td><td class="r num">${p.price != null ? fmtPrice(p.price) : '–'}</td><td class="r num">${p.value != null ? money(p.value) : '–'}</td>
+        <td><span class="chip ${p.act === 'same' ? 'ok' : p.act === 'fix' ? 'warn' : ''}">${label[p.act]}</span></td></tr>`).join('')}
+    </tbody></table></div>
+    <label class="row"><input type="checkbox" id="csv-archive" ${st.archive !== false ? 'checked' : ''}> <span>Datei beim Depot bei den Kontoauszügen ablegen</span></label>
+    <div class="row"><button class="primary" id="hold-go">Übernehmen</button><button id="csv-cancel">Abbrechen</button></div></div>`;
+}
+async function commitHold(stArg, opts = {}) {
+  const st = stArg || UI.csv, h = st && st.hold; if (!h) return;
+  let acct = h.acct;
+  if (acct === '__new') {
+    const name = (h.newName || '').trim(); if (!name) return toast('Bitte einen Namen für das Depot eingeben.');
+    if (DB.accounts[name]) return toast(`Ein Konto „${name}“ gibt es schon. Wähle es oben aus.`);
+    DB.accounts[name] = { name, type: 'Port', opening: 0, desc: '', iban: '', number: h.number, inactive: false };
+    ensureInstitutes(DB); acct = name;
+  }
+  const plan = holdPlan(Object.assign({}, st, { hold: Object.assign({}, h, { acct }) })), impId = 'i' + Date.now();
+  let nNew = 0, nFix = 0;
+  DB.securities = DB.securities || {};
+  for (const p of plan) {
+    const s = DB.securities[p.isin] || (DB.securities[p.isin] = {});
+    if (!s.name) s.name = p.name;
+    if (p.act === 'new') {
+      DB.tx.push({ id: ++DB.seq, imp: impId, key: `hold|${acct}|${p.isin}|${h.date}`, acct, date: h.date, amount: p.cost, payee: p.name,
+        memo: `Anfangsbestand ${fmtShares(p.shares)} Stück laut Depotübersicht${p.costUnknown ? ', Einstand unbekannt (Kurswert)' : ''}`, number: '', cleared: '', category: '', cls: '',
+        transfer: acct, splits: [], tags: [], sec: { isin: p.isin, name: p.name, shares: p.shares, price: p.shares ? p.cost / 100 / p.shares : null } });
+      if (s.fix) delete s.fix[acct];
+      nNew++;
+    } else if (p.act === 'fix') { s.fix = s.fix || {}; s.fix[acct] = p.shares; nFix++; }
+    // Kurs aus der Datei, wenn keiner da ist oder er älter ist
+    if (p.price != null && (!s.fetched || s.fetched.slice(0, 10) < h.date)) { s.quote = { price: p.price, currency: 'EUR', time: h.date + 'T12:00:00', market: p.market || 'laut Depotübersicht', changePct: null }; s.fetched = h.date + 'T12:00:00'; }
+  }
+  DB.tx.sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+  DB.imports.push({ id: impId, file: st.file, date: new Date().toISOString(), count: nNew });
+  await archiveImported(st, acct);
+  if (UI.csv === st) UI.csv = null; save();
+  const msg = `Depotbestand „${acct}“ vom ${dDE(h.date)}: ${nNew} Positionen eingebucht${nFix ? `, ${nFix} Stückzahlen angeglichen` : ''}, ${plan.length - nNew - nFix} unverändert.`;
+  if (opts.auto) return msg;
+  location.hash = 'depot'; render(); toast(msg, null, 9000);
+}
+
 /* Frühere Importe derselben Datei (z. B. als normale CSV in ein einziges Konto) */
 function trOldImports(st) {
   const ids = new Set(DB.imports.filter(i => i.file === st.file).map(i => i.id));
@@ -2111,8 +2219,8 @@ function trPanel() {
       <div class="row"><button class="primary" id="tr-go" ${fresh.length && !same && cashT && depT ? '' : 'disabled'}>${fresh.length} Buchungen importieren</button><button id="csv-cancel">Abbrechen</button></div>
     </section></div>`;
 }
-async function commitTR() {
-  const st = UI.csv, o = st.tr; if (!st || !o) return;
+async function commitTR(stArg, opts = {}) {
+  const st = stArg || UI.csv, o = st && st.tr; if (!st || !o) return;
   const mk = (sel, name, type) => {
     if (sel !== '__new') return sel;
     name = (name || '').trim(); if (!name) { toast('Bitte einen Namen für das neue Konto eingeben.'); return null; }
@@ -2160,10 +2268,11 @@ async function commitTR() {
   const ruled = applyRules(added.filter(n => !n.transfer && !n.category)).length;
   DB.tx.sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
   DB.imports.push({ id: impId, file: st.file, date: new Date().toISOString(), count: added.length });
-  if (st.archive !== false) await addStatement(cashA, new File([st.text], st.file, { type: 'text/csv' }), 'csv');
+  await archiveImported(st, cashA);
   const empty = old.accts.filter(a => a !== cashA && a !== depA && DB.accounts[a] && !DB.tx.some(t => t.acct === a));
-  UI.csv = null; save();
+  if (UI.csv === st) UI.csv = null; save();
   const msg = `${added.filter(t => t.acct === cashA).length} Buchungen in „${cashA}“ und ${added.filter(t => t.acct === depA).length} in „${depA}“ importiert${removed ? `, ${removed} vom früheren Import ersetzt` : ''}${relinked + merged ? `, ${relinked + merged} Umbuchungen verknüpft` : ''}${ruled ? `, ${ruled} per Regel zugeordnet` : ''}.${empty.length ? ` „${empty.join('“, „')}“ ist jetzt leer und kann unter Konten & Daten gelöscht werden.` : ''}`;
+  if (opts.auto) return msg;
   UI.f = Object.assign(NOFILTER(), { acct: cashA }); location.hash = 'buchungen'; render();
   toast(msg, { label: 'Rückgängig', run: () => { DB = JSON.parse(snap); save(); render(); toast('Import rückgängig gemacht.'); } }, 12000);
 }
@@ -2202,7 +2311,7 @@ const Fints = {
 };
 function openFints(instId, kind) {
   const i = DB.institutes[instId]; if (!i) return;
-  if (!Server.ok) return toast('Der Abruf geht nur, wenn die App von deinem Finanzmanager-Server geladen wird.');
+  if (!Server.ok) return toast('Der Abruf geht nur, wenn die App von deinem Kontor-Server geladen wird.');
   if (!Server.info.fints) return toast('Im Container ist die FinTS-Bibliothek nicht installiert.');
   if (!Server.info.productId) return toast('Für den Abruf fehlt die FinTS-Produkt-ID. Sie wird bei der Deutschen Kreditwirtschaft beantragt und im Container als FINTS_PRODUCT_ID eingetragen.', null, 10000);
   const o = i.online;
@@ -2353,6 +2462,131 @@ function fintsImport() {
   showDialog(); render();
 }
 
+/* ---------- Eingangsordner (nur mit Server) ----------
+   Heruntergeladene Bankdateien landen in einem Ordner auf dem Server. Solange die App offen ist, prüft sie ihn jede Minute:
+   CSV: Import, wenn das Konto sicher erkannt ist (IBAN, Kontonummer in Datei oder Dateiname, Trade Republic mit vorhandenen Konten).
+   PDF: Ablage als Kontoauszug, wenn genau ein Konto über IBAN oder Kontonummer im Text erkannt wird.
+   Alles andere kommt mit Begründung in die Inbox und wird dort von Hand zugeordnet. */
+const Drop = {
+  state: null, busy: false, last: null, log: [],
+  async api(path, body) {
+    const r = await fetch('api/' + path, body === undefined ? { cache: 'no-store' } : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({})); if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status); return j;
+  },
+  async bytes(box, name) {
+    const r = await fetch(`api/drop/file?box=${box}&name=${encodeURIComponent(name)}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error('Datei nicht lesbar (HTTP ' + r.status + ')');
+    return new Uint8Array(await r.arrayBuffer());
+  },
+  inboxCount() { return this.state && this.state.inbox ? this.state.inbox.length : 0; },
+  async archive(box, name, acct, source, period) {
+    const r = await this.api('drop/archive', { box, name, acct });
+    DB.statements = DB.statements || [];
+    DB.statements.push({ id: 's' + Date.now() + Math.floor(Math.random() * 1e6), acct, name, size: r.size, type: source === 'csv' ? 'text/csv' : 'application/pdf',
+      period: period || periodFromName(name), uploaded: new Date().toISOString(), source, srv: r.path });
+    return r;
+  },
+  /* Konto zu einem PDF: IBAN im Text, sonst Kontonummer im Text oder Dateinamen */
+  pdfAccount(info, name) {
+    const accts = Object.values(DB.accounts);
+    const byIban = [...new Set((info.ibans || []).filter(ibanOk).map(ib => accts.find(a => ibanKey(a.iban) === ib)).filter(Boolean))];
+    if (byIban.length === 1) return { acct: byIban[0].name, why: 'IBAN im Auszug' };
+    if (byIban.length > 1) return { many: byIban.map(a => a.name) };
+    const hay = (info.text || '') + ' ' + name;
+    const byNum = accts.filter(a => { const n = String(a.number || '').replace(/\D/g, '').replace(/^0+/, ''); return n.length >= 6 && new RegExp('(^|\\D)0*' + n + '(\\D|$)').test(hay); });
+    if (byNum.length === 1) return { acct: byNum[0].name, why: 'Kontonummer im Auszug' };
+    return byNum.length > 1 ? { many: byNum.map(a => a.name) } : null;
+  },
+  async processOne(f) {
+    const inbox = reason => this.api('drop/inbox', { name: f.name, reason }).then(() => ({ name: f.name, inbox: reason }));
+    if (f.kind === 'csv') {
+      const st = csvState(f.name, await this.bytes('', f.name), f.size);
+      if (!st) return inbox('Keine Zeilen gefunden.');
+      st.drop = { box: '', name: f.name };
+      if (st.hold) {
+        if (!st.hold.strong) return inbox('Depotübersicht: Beim ersten Mal bitte von Hand übernehmen, damit das Depot zugeordnet oder angelegt wird.');
+        const msg = await commitHold(st, { auto: true });
+        return msg ? { name: f.name, msg } : inbox('Import abgebrochen.');
+      }
+      if (st.tr) {
+        if (st.tr.cash === '__new' || st.tr.depot === '__new') return inbox('Trade Republic: Beim ersten Mal bitte von Hand importieren, damit Cash-Konto und Depot angelegt werden.');
+        st.tr.dropOld = false;
+        const msg = await commitTR(st, { auto: true });
+        return msg ? { name: f.name, msg } : inbox('Import abgebrochen.');
+      }
+      // sicher nur bei direkter Übereinstimmung; „Umbuchungen gehen auf dieses Konto“ oder Überschneidungen reichen nicht
+      const sug = st.suggestion, strong = sug && (sug.strong || /^Die IBAN ist bei diesem Konto|^Die Kontonummer passt/.test(sug.why));
+      if (!strong) return inbox(sug ? `Vermutlich „${sug.acct}“ (${sug.why}). Bitte bestätigen.` : 'Kein Konto erkannt: Weder IBAN noch Kontonummer passen zu einem Konto.');
+      if (!(st.map.date !== undefined && (st.map.amount !== undefined || st.map.debit !== undefined || st.map.credit !== undefined))) return inbox('Spalten für Datum oder Betrag nicht erkannt.');
+      const msg = await commitCSV(st, { auto: true });
+      return msg ? { name: f.name, msg } : inbox('Import abgebrochen.');
+    }
+    if (f.kind === 'pdf') {
+      const info = await this.api(`drop/pdf?box=&name=${encodeURIComponent(f.name)}`);
+      if (info.error) return inbox(info.error);
+      const m = this.pdfAccount(info, f.name);
+      if (!m) return inbox(info.text.trim() ? 'Kein Konto erkannt: Weder IBAN noch Kontonummer im Auszug passen zu einem Konto.' : 'Im PDF steht kein lesbarer Text (eingescannt?).');
+      if (m.many) return inbox(`Passt zu mehreren Konten: ${m.many.join(', ')}.`);
+      const dates = (info.dates || []).filter(d => d <= TODAY), period = periodFromName(f.name) || (dates.length ? dates[dates.length - 1].slice(0, 7) : '');
+      await this.archive('', f.name, m.acct, 'pdf', period);
+      return { name: f.name, msg: `als Kontoauszug unter „${m.acct}“ abgelegt (${m.why})` };
+    }
+    return inbox('Dateityp wird nicht unterstützt, nur PDF und CSV.');
+  },
+  async run(manual) {
+    if (!Server.ok || this.busy) return;
+    this.busy = true; if (manual) render();
+    const done = [];
+    try {
+      this.state = await this.api('drop');
+      if (!this.state.available) return;
+      for (const f of this.state.files) {
+        try { done.push(await this.processOne(f)); }
+        catch (e) { try { done.push(await this.api('drop/inbox', { name: f.name, reason: 'Fehler: ' + e.message }).then(() => ({ name: f.name, inbox: 'Fehler: ' + e.message }))); } catch (e2) { } }
+      }
+      if (done.length) { save(); this.state = await this.api('drop'); }
+      this.last = new Date().toISOString();
+      this.log = done.concat(this.log).slice(0, 30);
+    } catch (e) { if (manual) toast('Eingangsordner nicht lesbar: ' + e.message); }
+    finally {
+      this.busy = false; updateBadges();
+      if (done.length) {
+        const ok = done.filter(d => !d.inbox).length, inb = done.length - ok;
+        toast(`Eingang: ${ok ? `${ok} ${ok === 1 ? 'Datei' : 'Dateien'} verarbeitet` : ''}${ok && inb ? ', ' : ''}${inb ? `${inb} in der Inbox` : ''}.${ok === 1 && done.find(d => !d.inbox) ? ' ' + done.find(d => !d.inbox).msg : ''}`, inb ? { label: 'Zur Inbox', run: () => { location.hash = 'import'; } } : null, 10000);
+        render();
+      } else if (manual) { toast('Keine neuen Dateien im Eingang.'); render(); }
+      else if (location.hash === '#import') render();
+    }
+  },
+  start() { this.run(); setInterval(() => { if (document.visibilityState === 'visible') this.run(); }, 60000); }
+};
+function updateBadges() {
+  const b = $('#in-badge'); if (!b) return;
+  const n = Drop.inboxCount(); b.hidden = !n; b.textContent = n;
+}
+function dropPanel() {
+  if (!Server.ok || !Drop.state) return '';
+  const s = Drop.state;
+  if (!s.available) return `<div class="panel"><h2>Eingangsordner</h2><p class="muted">Der Ordner <code>${esc(s.dir)}</code> ist im Container nicht vorhanden oder nicht beschreibbar. Siehe Anleitung, Abschnitt Eingangsordner.</p></div>`;
+  const accts = Object.keys(DB.accounts).sort((a, b) => a.localeCompare(b, 'de'));
+  const sel = (id, cur) => `<select id="${id}" aria-label="Konto"><option value="">Konto wählen</option>${accts.map(a => `<option value="${esc(a)}" ${a === cur ? 'selected' : ''}>${esc(a)}</option>`).join('')}</select>`;
+  const guess = r => { const m = (r.reason || '').match(/Vermutlich „([^“]+)“/); return m ? m[1] : ''; };
+  return `<div class="panel" id="inbox"><div class="row spread"><h2>Eingang ${s.inbox.length ? `<span class="chip warn">${s.inbox.length} in der Inbox</span>` : ''}</h2>
+      <div class="row"><span class="muted">${Drop.last ? 'zuletzt geprüft ' + new Date(Drop.last).toLocaleTimeString('de-DE', { timeStyle: 'short' }) : ''}</span>
+      <button id="drop-run" ${Drop.busy ? 'disabled' : ''}>${Drop.busy ? '<span class="spin" aria-hidden="true"></span> Prüfe …' : 'Jetzt prüfen'}</button></div></div>
+    <p class="muted">Lege heruntergeladene Kontoauszüge (PDF) und Umsätze (CSV) in den Ordner <code>${esc(s.dir)}</code>. Solange die App offen ist, werden sie jede Minute verarbeitet. Was nicht sicher zugeordnet werden kann, landet hier.</p>
+    ${s.inbox.length ? `<div class="table-wrap"><table><thead><tr><th>Datei</th><th>Grund</th><th></th></tr></thead><tbody>
+      ${s.inbox.map((r, i) => `<tr><td><span class="chip">${r.kind === 'csv' ? 'CSV' : r.kind === 'pdf' ? 'PDF' : '?'}</span> <a href="api/drop/file?box=inbox&name=${encodeURIComponent(r.name)}" target="_blank" rel="noopener">${esc(r.name)}</a><span class="sub">${new Date(r.mtime).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}</span></td>
+        <td class="muted">${esc(r.reason || '')}</td>
+        <td class="r"><div class="row nowrap" style="justify-content:flex-end">
+          ${r.kind === 'csv' ? `<button class="primary" data-inimport="${i}">Importieren …</button>` : r.kind === 'pdf' ? `${sel('in-acct-' + i, guess(r))}<button class="primary" data-instore="${i}">Ablegen</button>` : ''}
+          <button data-inretry="${i}" title="Erneut automatisch zuordnen, z. B. nachdem du beim Konto die IBAN eingetragen hast">Erneut prüfen</button>
+          <button class="icon danger" data-intrash="${i}" title="In den Papierkorb des Servers" aria-label="Verwerfen">🗑</button></div></td></tr>`).join('')}
+      </tbody></table></div>` : '<p class="pos">Die Inbox ist leer.</p>'}
+    ${Drop.log.length ? `<details class="sub-panel"><summary>Zuletzt verarbeitet (${Drop.log.length})</summary><ul>${Drop.log.map(d => `<li><b>${esc(d.name)}</b>: ${esc(d.inbox ? 'Inbox. ' + d.inbox : d.msg)}</li>`).join('')}</ul></details>` : ''}
+  </div>`;
+}
+
 /* ---------- Kontoauszüge ablegen ----------
    Dateien liegen in IndexedDB (größerer Speicher als localStorage), die Liste in DB.statements.
    Das JSON-Backup enthält die Dateien selbst nicht. */
@@ -2371,17 +2605,23 @@ const Files = {
   del(id) { return this.run('readwrite', st => st.delete(id)); }
 };
 function periodFromName(n) {
-  let m = n.match(/(20\d\d)[-_. ]?(0[1-9]|1[0-2])(?!\d)/); if (m) return `${m[1]}-${m[2]}`;
+  // bei Zeiträumen wie „2019-01-01_2026-11-15“ zählt das Ende
+  let m = [...n.matchAll(/(20\d\d)[-_. ]?(0[1-9]|1[0-2])(?!\d)/g)].pop(); if (m) return `${m[1]}-${m[2]}`;
   m = n.match(/(?<!\d)(0[1-9]|1[0-2])[-_. /](20\d\d)/); if (m) return `${m[2]}-${m[1]}`;
   m = n.match(/(\d{1,2})\.(\d{1,2})\.(20\d\d)/); if (m) return `${m[3]}-${m[2].padStart(2, '0')}`;
   return '';
 }
 async function addStatement(acct, file, source) {
   const id = 's' + Date.now() + Math.floor(Math.random() * 1e6);
-  try { await Files.put(id, file); }
-  catch (e) { toast('Die Datei konnte nicht gespeichert werden: ' + e.message); return null; }
+  let srv = null;
+  try {
+    if (Server.ok) {   // mit Server: Datei liegt dort im Archiv, nicht im Browser
+      const r = await fetch(`api/archive/upload?acct=${encodeURIComponent(acct)}&name=${encodeURIComponent(file.name)}`, { method: 'PUT', body: file });
+      const j = await r.json(); if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status); srv = j.path;
+    } else await Files.put(id, file);
+  } catch (e) { toast('Die Datei konnte nicht gespeichert werden: ' + e.message); return null; }
   DB.statements = DB.statements || [];
-  DB.statements.push({ id, acct, name: file.name, size: file.size, type: file.type || (source === 'csv' ? 'text/csv' : 'application/pdf'), period: periodFromName(file.name), uploaded: new Date().toISOString(), source });
+  DB.statements.push(Object.assign({ id, acct, name: file.name, size: file.size, type: file.type || (source === 'csv' ? 'text/csv' : 'application/pdf'), period: periodFromName(file.name), uploaded: new Date().toISOString(), source }, srv ? { srv } : {}));
   return id;
 }
 async function storeStatements(acct, files) {
@@ -2391,7 +2631,13 @@ async function storeStatements(acct, files) {
   toast(`${n} ${n === 1 ? 'Datei' : 'Dateien'} unter „${acct}“ abgelegt.`);
 }
 async function openStatement(id, download) {
-  const s = DB.statements.find(x => x.id === id), blob = await Files.get(id);
+  const s = DB.statements.find(x => x.id === id);
+  if (s && s.srv) {
+    if (!Server.ok) return toast('Der Auszug liegt auf deinem Server. Öffne die App über den Server.');
+    const url = `api/archive/file?path=${encodeURIComponent(s.srv)}${download ? '&dl=1' : ''}`;
+    return download ? (location.href = url) : window.open(url, '_blank');
+  }
+  const blob = await Files.get(id);
   if (!blob) return toast('Die Datei wurde in diesem Browser nicht gefunden.');
   const url = URL.createObjectURL(blob);
   if (download) { const a = document.createElement('a'); a.href = url; a.download = s.name; document.body.appendChild(a); a.click(); a.remove(); }
@@ -2405,7 +2651,7 @@ function statementsPanel() {
   const kb = n => n > 1048576 ? (n / 1048576).toFixed(1).replace('.', ',') + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
   const acctSel = `<select id="stmt-acct"><option value="">Konto wählen</option>${Object.keys(DB.accounts).sort((a, b) => a.localeCompare(b, 'de')).map(a => `<option value="${esc(a)}" ${a === UI.stmtAcct ? 'selected' : ''}>${esc(a)}</option>`).join('')}</select>`;
   return `<div class="panel" id="statements"><h2>Kontoauszüge</h2>
-    <p class="muted">Lege PDF-Kontoauszüge und importierte CSV-Dateien unter dem jeweiligen Konto ab. Sie bleiben in diesem Browser gespeichert und sind nicht Teil des JSON-Backups.</p>
+    <p class="muted">Lege PDF-Kontoauszüge und importierte CSV-Dateien unter dem jeweiligen Konto ab. ${Server.ok ? 'Sie liegen auf deinem Server im Ordner „kontoauszuege“.' : 'Sie bleiben in diesem Browser gespeichert und sind nicht Teil des JSON-Backups.'}</p>
     ${pend ? `<div class="notice-panel panel"><p><b>${pend.length} ${pend.length === 1 ? 'Datei' : 'Dateien'} bereit:</b> ${pend.map(f => esc(f.name)).join(', ')}</p>
       <div class="row">${acctSel}<button class="primary" id="stmt-store">Ablegen</button><button id="stmt-cancel">Abbrechen</button></div></div>`
     : `<div class="row">${acctSel}<label class="btn" for="stmt-file">PDF-Auszüge auswählen</label><input type="file" id="stmt-file" accept=".pdf,.csv,application/pdf" multiple hidden></div>`}
@@ -2843,7 +3089,7 @@ function depotValue(acct) {
 }
 const quoteAge = () => { const ts = Object.values(DB.securities || {}).map(s => s.fetched || '').sort(); return ts.length ? ts[ts.length - 1] : ''; };
 async function refreshQuotes(silent) {
-  if (!Server.ok) { if (!silent) toast('Kurse holt der Finanzmanager-Server. Öffne die App über den Server.'); return; }
+  if (!Server.ok) { if (!silent) toast('Kurse holt der Kontor-Server. Öffne die App über den Server.'); return; }
   const isins = [...new Set(Object.values(DB.accounts).filter(isDepot).flatMap(a => depotPositions(a.name).filter(p => p.open).map(p => p.isin)))];
   if (!isins.length) return;
   UI.quoting = true; render();
@@ -2869,10 +3115,10 @@ Views.depot = () => {
   if (Server.ok && !UI.quoting && depots.length && (!age || Date.now() - Date.parse(age) > 15 * 60e3) && !UI.quoteTried) { UI.quoteTried = true; setTimeout(() => refreshQuotes(true), 0); }
   const head = `<div class="row spread"><h1>Depot</h1><div class="row">
       <span class="muted">${age ? `Kurse von ${new Date(age).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}` : 'Noch keine Kurse'}</span>
-      <button id="quotes-refresh" ${Server.ok && !UI.quoting ? '' : 'disabled'} title="${Server.ok ? 'Holt die aktuellen Kurse über deinen Server' : 'Nur mit dem Finanzmanager-Server'}">${UI.quoting ? '<span class="spin" aria-hidden="true"></span> Lade Kurse …' : 'Kurse aktualisieren'}</button></div></div>`;
+      <button id="quotes-refresh" ${Server.ok && !UI.quoting ? '' : 'disabled'} title="${Server.ok ? 'Holt die aktuellen Kurse über deinen Server' : 'Nur mit dem Kontor-Server'}">${UI.quoting ? '<span class="spin" aria-hidden="true"></span> Lade Kurse …' : 'Kurse aktualisieren'}</button></div></div>`;
   if (!depots.length) return head + '<div class="panel empty"><p class="muted">Noch kein Depot. Ein Konto mit der Art „Depot“ entsteht zum Beispiel beim Import einer Trade-Republic-Datei.</p></div>';
   const pct = (a, b) => b ? (a / b * 100).toLocaleString('de-DE', { maximumFractionDigits: 1, minimumFractionDigits: 1 }) + ' %' : '';
-  return head + (Server.ok ? '' : '<div class="notice">Aktuelle Kurse gibt es nur, wenn die App über deinen Finanzmanager-Server geöffnet ist. Hier siehst du Bestand und Einstand.</div>')
+  return head + (Server.ok ? '' : '<div class="notice">Aktuelle Kurse gibt es nur, wenn die App über deinen Kontor-Server geöffnet ist. Hier siehst du Bestand und Einstand.</div>')
     + depots.map(a => {
       const all = depotPositions(a.name), open = all.filter(p => p.open), closed = all.filter(p => !p.open);
       const tot = { cost: open.reduce((s, p) => s + p.cost, 0), value: open.reduce((s, p) => s + (p.value ?? p.cost), 0), known: open.every(p => p.value != null) };
@@ -3064,7 +3310,7 @@ Views.import = () => {
       <div class="row"><button class="primary" id="imp-go" ${newCount ? '' : 'disabled'}>${newCount} Buchungen importieren</button><button id="imp-cancel">Abbrechen</button></div>
     </div>`;
   }
-  return `<h1>Import</h1>
+  return `<h1>Import</h1>${dropPanel()}
     <div class="panel">
       <label class="drop" id="drop" for="file">
         <b>Datei hierher ziehen: QIF aus Quicken, CSV von der Bank oder PDF-Kontoauszüge</b>
@@ -3073,7 +3319,7 @@ Views.import = () => {
       </label>
       <p class="muted">Die Datei wird nur in diesem Browser gelesen und nicht verändert. Bereits importierte Buchungen werden erkannt und übersprungen. PDF-Auszüge werden unter dem Konto abgelegt, ihre Buchungen aber nicht ausgelesen.</p>
     </div>
-    ${UI.csv ? (UI.csv.tr ? trPanel() : csvPanel()) : ''}
+    ${UI.csv ? (UI.csv.tr ? trPanel() : UI.csv.hold ? holdPanel() : csvPanel()) : ''}
     ${preview}`;
 };
 
@@ -3135,8 +3381,8 @@ function onlineForm(i) {
       <label class="field"><span>Umsätze abrufen ab</span><input type="date" id="since-${id}" data-inst="${esc(i.id)}" data-field="online.since" value="${esc(o.since)}"></label>
       ${Server.ok ? `<div class="field wide row"><button type="button" data-fints="test" data-inst="${esc(i.id)}">Verbindung testen</button><button type="button" class="primary" data-fints="fetch" data-inst="${esc(i.id)}">Umsätze abrufen</button>
         <span class="muted">${o.lastFetch ? `Zuletzt abgerufen am ${dDE(o.lastFetch.slice(0, 10))}. ` : ''}Die PIN wird bei jedem Abruf abgefragt und nie gespeichert. Deshalb gibt es keinen automatischen Abruf.</span></div>`
-      : `<div class="field wide row"><button disabled title="Nur mit dem Finanzmanager-Server">Verbindung testen</button>
-        <span class="muted">Der Abruf läuft über deinen Finanzmanager-Server auf Unraid, weil Banken keinen direkten Zugriff aus dem Browser erlauben. Öffne die App über den Server, dann sind die Knöpfe aktiv. Die PIN wird nie gespeichert.</span></div>`}`
+      : `<div class="field wide row"><button disabled title="Nur mit dem Kontor-Server">Verbindung testen</button>
+        <span class="muted">Der Abruf läuft über deinen Kontor-Server auf Unraid, weil Banken keinen direkten Zugriff aus dem Browser erlauben. Öffne die App über den Server, dann sind die Knöpfe aktiv. Die PIN wird nie gespeichert.</span></div>`}`
       : o.method === 'psd2' ? `<p class="muted field wide">Vorgemerkt. Ein Open-Banking-Dienst (z. B. GoCardless oder finAPI) wird in der Unraid-Version angebunden. Dafür ist ein eigenes Konto bei dem Dienst nötig, und die Umsätze laufen über dessen Server.</p>`
       : `<p class="muted field wide">Umsätze kommen per Datei-Import. Wähle FinTS, um den direkten Abruf vorzubereiten.</p>`}
     </div></details>`;
@@ -3334,6 +3580,8 @@ document.addEventListener('change', e => {
   else if (t.id === 'tr-cashname') { UI.csv.tr.cashName = t.value; render(); }
   else if (t.id === 'tr-depotname') { UI.csv.tr.depotName = t.value; render(); }
   else if (t.id === 'tr-dropold') { UI.csv.tr.dropOld = t.checked; render(); }
+  else if (t.id === 'hold-acct') { UI.csv.hold.acct = t.value; render(); }
+  else if (t.id === 'hold-name') { UI.csv.hold.newName = t.value; }
   else if (t.id === 'csv-newname') { UI.csv.newName = t.value; }
   else if (t.id === 'csv-newtype') { UI.csv.newType = t.value; }
   else if (t.id === 'csv-saveiban') { UI.csv.saveIban = t.checked; }
@@ -3503,6 +3751,23 @@ document.addEventListener('click', e => {
   if (t.dataset.ed && ED) return editorClick(t);
   if (t.dataset.addtag) { const i = $('#ed-tags'); i.value = parseTags(i.value + ',' + t.dataset.addtag).join(', '); t.remove(); return; }
   if (t.id === 'quotes-refresh') return refreshQuotes();
+  if (t.id === 'drop-run') return Drop.run(true);
+  if (t.dataset.inimport || t.dataset.instore || t.dataset.inretry || t.dataset.intrash) {
+    const i = +(t.dataset.inimport || t.dataset.instore || t.dataset.inretry || t.dataset.intrash), r = Drop.state && Drop.state.inbox[i]; if (!r) return;
+    const refresh = async msg => { Drop.state = await Drop.api('drop'); updateBadges(); render(); if (msg) toast(msg); };
+    (async () => {
+      try {
+        if (t.dataset.inimport) return readCSVFile(new File([await Drop.bytes('inbox', r.name)], r.name), await Drop.bytes('inbox', r.name), { box: 'inbox', name: r.name });
+        if (t.dataset.instore) {
+          const acct = $('#in-acct-' + i).value; if (!acct) return toast('Bitte zuerst das Konto wählen.');
+          await Drop.archive('inbox', r.name, acct, 'pdf'); save(); return refresh(`„${r.name}“ unter „${acct}“ abgelegt.`);
+        }
+        if (t.dataset.inretry) { await Drop.api('drop/requeue', { name: r.name }); await Drop.run(true); return; }
+        if (t.dataset.intrash) { await Drop.api('drop/trash', { box: 'inbox', name: r.name }); return refresh(`„${r.name}“ verworfen. Sie liegt im Papierkorb-Ordner des Servers.`); }
+      } catch (err) { toast('Das hat nicht geklappt: ' + err.message); }
+    })();
+    return;
+  }
   if (t.dataset.secbook) { UI.f = Object.assign(NOFILTER(), { acct: t.dataset.acct, q: t.dataset.secbook }); location.hash = 'buchungen'; return; }
   if (t.dataset.fints) return openFints(t.dataset.inst, t.dataset.fints);
   if (t.id === 'tx-new') return openTx(null);
@@ -3521,6 +3786,7 @@ document.addEventListener('click', e => {
   if (t.id === 'co-unignore') { const n = DB.contractIgnore.length; DB.contractIgnore = []; save(); render(); return toast(`${n} ausgeblendete Zahlungen werden wieder angezeigt.`); }
   if (t.id === 'csv-go') return commitCSV();
   if (t.id === 'tr-go') return commitTR();
+  if (t.id === 'hold-go') return commitHold();
   if (t.id === 'csv-cancel') { UI.csv = null; if (!nextCsv()) render(); return; }
   if (t.id === 'stmt-store') { const a = $('#stmt-acct').value; if (!a) return toast('Bitte zuerst das Konto wählen.'); UI.stmtAcct = a; return storeStatements(a, UI.stmtFiles || []); }
   if (t.id === 'stmt-cancel') { UI.stmtFiles = null; return render(); }
@@ -3530,8 +3796,9 @@ document.addEventListener('click', e => {
   if (t.dataset.stmtdel) { $('#sd-' + t.dataset.stmtdel).innerHTML = `<div class="row nowrap" style="justify-content:flex-end"><span class="muted">Löschen?</span><button class="danger" data-stmtdelyes="${esc(t.dataset.stmtdel)}">Ja</button><button data-stmtdelno="1">Nein</button></div>`; return; }
   if (t.dataset.stmtdelno) return render();
   if (t.dataset.stmtdelyes) {
-    const id = t.dataset.stmtdelyes;
-    Files.del(id).catch(() => { });
+    const id = t.dataset.stmtdelyes, s0 = DB.statements.find(x => x.id === id);
+    if (s0 && s0.srv) fetch('api/archive/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: s0.srv }) }).catch(() => { });
+    else Files.del(id).catch(() => { });
     DB.statements = DB.statements.filter(x => x.id !== id); save(); render(); return toast('Auszug gelöscht.');
   }
   if (t.id === 'ex-go') return downloadCSV(buildExport(UI.exp), UI.exp.format);
@@ -3691,7 +3958,7 @@ function setCategory(id, cat) {
 function downloadBackup() {
   const blob = new Blob([JSON.stringify(DB)], { type: 'application/json' });
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = `finanzmanager-backup-${TODAY}.json`;
+  a.href = URL.createObjectURL(blob); a.download = `kontor-backup-${TODAY}.json`;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }

@@ -1,13 +1,14 @@
 services:
-  finanzmanager:
+  kontor:
     build: .
-    image: finanzmanager:latest
-    container_name: finanzmanager
+    image: kontor:latest
+    container_name: kontor
     restart: unless-stopped
     ports:
       - "8090:8080"
     volumes:
-      - /mnt/user/appdata/finanzmanager:/data
+      - /mnt/user/appdata/kontor:/data
+      - /mnt/user/finanzen/eingang:/eingang
     environment:
       - APP_PASSWORD=bitte-aendern
       - FINTS_PRODUCT_ID=

@@ -1,4 +1,4 @@
-"""Finanzmanager-Server für Unraid.
+"""Kontor-Server für Unraid.
 
 Liefert die App aus, speichert die Daten als JSON in DATA_DIR (mit stündlichen Sicherungen)
 und ruft Umsätze per FinTS ab (siehe fints_session.py).
@@ -23,8 +23,9 @@ import threading
 import time
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
+import drop
 import fints_session
 import quotes
 
@@ -38,7 +39,8 @@ PASSWORD = os.environ.get('APP_PASSWORD', '')
 BACKUP_KEEP = int(os.environ.get('BACKUP_KEEP', '72'))
 MAX_BODY = 64 * 1024 * 1024
 
-DATA_FILE = os.path.join(DATA_DIR, 'finanzmanager.json')
+DATA_FILE = os.path.join(DATA_DIR, 'kontor.json')
+OLD_DATA_FILE = os.path.join(DATA_DIR, 'finanzmanager.json')   # Name bis zur Umbenennung in Kontor
 BACKUP_DIR = os.path.join(DATA_DIR, 'backups')
 LOCK = threading.Lock()
 
@@ -73,12 +75,12 @@ def backup_if_due():
     if not os.path.exists(DATA_FILE):
         return
     os.makedirs(BACKUP_DIR, exist_ok=True)
-    name = f'finanzmanager-{datetime.now():%Y%m%d-%H}.json'
+    name = f'kontor-{datetime.now():%Y%m%d-%H}.json'
     target = os.path.join(BACKUP_DIR, name)
     if os.path.exists(target):
         return
     shutil.copy2(DATA_FILE, target)
-    files = sorted(f for f in os.listdir(BACKUP_DIR) if f.startswith('finanzmanager-') and f.endswith('.json'))
+    files = sorted(f for f in os.listdir(BACKUP_DIR) if f.startswith('kontor-') and f.endswith('.json'))
     for old in files[:-BACKUP_KEEP]:
         try:
             os.remove(os.path.join(BACKUP_DIR, old))
@@ -89,7 +91,7 @@ def backup_if_due():
 # ---------- HTTP ----------
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = 'Finanzmanager/' + VERSION
+    server_version = 'Kontor/' + VERSION
 
     def log_message(self, fmt, *args):
         # Kein Logging von Anfragen: in Bodies stehen PINs und Kontodaten.
@@ -127,7 +129,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
         self.send_response(401)
-        self.send_header('WWW-Authenticate', 'Basic realm="Finanzmanager", charset="UTF-8"')
+        self.send_header('WWW-Authenticate', 'Basic realm="Kontor", charset="UTF-8"')
         self.send_header('Content-Length', '0')
         self.end_headers()
         return False
@@ -157,12 +159,74 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith('/api/fints/'):
             s = fints_session.get(path.rsplit('/', 1)[-1])
             return self.send_json(200, s.public()) if s else self.send_json(404, {'error': 'Abruf nicht gefunden oder abgelaufen.'})
+        if path.startswith('/api/drop') or path.startswith('/api/archive'):
+            return self.drop_get(path, parse_qs(urlparse(self.path).query))
         return self.serve_static(path)
+
+    # --- Eingangsordner und Archiv ---
+    def send_file(self, name, data, download):
+        ctype = mimetypes.guess_type(name)[0] or 'application/octet-stream'
+        self.send_response(200)
+        self.send_header('Content-Type', ctype)
+        self.send_header('Content-Length', str(len(data)))
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('Content-Disposition', f"{'attachment' if download else 'inline'}; filename*=UTF-8''{quote(name)}")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def drop_get(self, path, q):
+        arg = lambda k: (q.get(k) or [''])[0]
+        try:
+            if path == '/api/drop':
+                if not drop.available():
+                    return self.send_json(200, {'dir': drop.DROP_DIR, 'available': False, 'files': [], 'inbox': []})
+                return self.send_json(200, dict(drop.listing(), available=True))
+            if path == '/api/drop/file':
+                return self.send_file(arg('name'), drop.read(arg('box'), arg('name')), arg('dl') == '1')
+            if path == '/api/drop/pdf':
+                return self.send_json(200, drop.pdf_info(arg('box'), arg('name')))
+            if path == '/api/archive/file':
+                name, data = drop.archive_read(arg('path'))
+                return self.send_file(name, data, arg('dl') == '1')
+        except (FileNotFoundError, ValueError) as e:
+            return self.send_json(404, {'error': str(e)})
+        except Exception as e:
+            return self.send_json(500, {'error': f'{type(e).__name__}: {e}'})
+        return self.send_json(404, {'error': 'Nicht gefunden'})
+
+    def drop_post(self, path, body):
+        try:
+            if path == '/api/drop/inbox':
+                return self.send_json(200, {'name': drop.to_inbox(body.get('name'), body.get('reason'))})
+            if path == '/api/drop/requeue':
+                return self.send_json(200, {'name': drop.requeue(body.get('name'))})
+            if path == '/api/drop/archive':
+                return self.send_json(200, drop.archive(body.get('box'), body.get('name'), body.get('acct')))
+            if path == '/api/drop/trash':
+                drop.trash(body.get('box'), body.get('name'))
+                return self.send_json(200, {'ok': True})
+            if path == '/api/archive/delete':
+                drop.archive_delete(body.get('path'))
+                return self.send_json(200, {'ok': True})
+        except (FileNotFoundError, ValueError) as e:
+            return self.send_json(404, {'error': str(e)})
+        except Exception as e:
+            return self.send_json(500, {'error': f'{type(e).__name__}: {e}'})
+        return self.send_json(404, {'error': 'Nicht gefunden'})
 
     def do_PUT(self):
         path = urlparse(self.path).path
         if not self.authorized():
             return
+        if path == '/api/archive/upload':
+            q = parse_qs(urlparse(self.path).query)
+            n = int(self.headers.get('Content-Length') or 0)
+            if n > MAX_BODY:
+                return self.send_json(413, {'error': 'Datei zu groß'})
+            try:
+                return self.send_json(200, drop.archive_upload((q.get('acct') or [''])[0], (q.get('name') or [''])[0], self.rfile.read(n)))
+            except ValueError as e:
+                return self.send_json(400, {'error': str(e)})
         if path != '/api/data':
             return self.send_json(404, {'error': 'Nicht gefunden'})
         try:
@@ -170,7 +234,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             return self.send_json(400, {'error': f'Ungültige Daten: {e}'})
         if not isinstance(data, dict) or data.get('version') != 1 or not isinstance(data.get('tx'), list):
-            return self.send_json(400, {'error': 'Das sieht nicht nach Finanzmanager-Daten aus.'})
+            return self.send_json(400, {'error': 'Das sieht nicht nach Kontor-Daten aus.'})
         expected = self.headers.get('If-Match', '')
         with LOCK:
             store = read_store()
@@ -189,6 +253,8 @@ class Handler(BaseHTTPRequestHandler):
             body = self.read_json()
         except Exception as e:
             return self.send_json(400, {'error': f'Ungültige Anfrage: {e}'})
+        if path.startswith('/api/drop/') or path.startswith('/api/archive/'):
+            return self.drop_post(path, body if isinstance(body, dict) else {})
         if path == '/api/quotes':
             isins = body.get('isins') if isinstance(body, dict) else None
             if not isinstance(isins, list):
@@ -241,14 +307,19 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     os.makedirs(DATA_DIR, exist_ok=True)
+    if not os.path.exists(DATA_FILE) and os.path.exists(OLD_DATA_FILE):
+        os.replace(OLD_DATA_FILE, DATA_FILE)
+        log('Datendatei finanzmanager.json in kontor.json umbenannt')
     if not os.path.isfile(os.path.join(APP_DIR, 'index.html')):
         log(f'index.html nicht gefunden in {APP_DIR}')
         sys.exit(1)
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
     srv.daemon_threads = True
-    log(f'Finanzmanager {VERSION} auf Port {PORT}, Daten in {DATA_DIR}, '
+    log(f'Kontor {VERSION} auf Port {PORT}, Daten in {DATA_DIR}, '
         f'Anmeldung {"an" if PASSWORD else "AUS"}, FinTS {"bereit" if fints_session.available() else "nicht installiert"}'
         f'{"" if fints_session.PRODUCT_ID else " (ohne Produkt-ID)"}')
+    drop.setup(DATA_DIR)
+    log(f'Eingangsordner {drop.DROP_DIR} {"bereit" if drop.available() else "FEHLT oder nicht beschreibbar"}')
     threading.Thread(target=fints_session.janitor, daemon=True).start()
     try:
         srv.serve_forever()

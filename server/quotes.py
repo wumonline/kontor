@@ -10,7 +10,7 @@ import time
 import urllib.parse
 import urllib.request
 
-UA = {'User-Agent': 'Mozilla/5.0 (Finanzmanager)', 'Accept': 'application/json'}
+UA = {'User-Agent': 'Mozilla/5.0 (Kontor)', 'Accept': 'application/json'}
 BASE = 'https://api.onvista.de/api/v1'
 PREFERRED = ['_LSX', '@_LUSG', '_GAT', '_TRO', '_GER', '@_BBF', '_QUO', '_FRA', '_STU', '_MUN', '_HAM', '_DUS', '_BPS', '@_WM']
 CACHE_SECONDS = 60

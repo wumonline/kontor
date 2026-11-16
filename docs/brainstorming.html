@@ -1,4 +1,4 @@
-<title>Finanzmanager Brainstorming</title>
+<title>Kontor Brainstorming</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -127,7 +127,7 @@ footer { color: var(--muted); font-size: 13px; }
   <header>
     <div>
       <div class="eyebrow">Brainstorming · Persönliche Finanzsoftware</div>
-      <h1>Finanzmanager: Was soll er können?</h1>
+      <h1>Kontor: Was soll er können?</h1>
       <p class="lead">Eine Sammlung von Ideen als Ausgangspunkt. Markiere bei jeder Funktion, ob sie für dich <b>Muss</b>, <b>Soll</b> oder <b>Später</b> ist. Deine Auswahl wird in diesem Browser gespeichert, damit wir danach den ersten Umfang festlegen können.</p>
     </div>
     <div class="ledger" aria-label="Beispiel einer Umsatzliste">
@@ -240,7 +240,7 @@ footer { color: var(--muted); font-size: 13px; }
         <tbody>
           <tr><td><b>Lokale Web-App</b><br><span class="mono">HTML + JS, im Browser</span></td><td>Schnell gebaut, läuft überall, keine Installation</td><td>Kein Handy-Sync ohne Zusatz, Daten nur in einem Browser</td><td class="yes">Nur auf deinem PC</td></tr>
           <tr><td><b>Desktop-App</b><br><span class="mono">Python oder Electron + SQLite</span></td><td>Echte Datenbankdatei, gut für Backups in OneDrive, offline</td><td>Nur am PC nutzbar, etwas mehr Aufwand</td><td class="yes">Datei auf deinem PC</td></tr>
-          <tr class="chosen"><td><b>Unraid-Homeserver</b><span class="tag">gewählt</span><br><span class="mono">Docker-Container + SQLite</span></td><td>Von PC und Handy erreichbar, Daten bleiben zu Hause, Installation als Unraid-App</td><td>Absicherung nötig (siehe unten)</td><td class="yes"><span class="mono">/mnt/user/appdata/finanzmanager</span></td></tr>
+          <tr class="chosen"><td><b>Unraid-Homeserver</b><span class="tag">gewählt</span><br><span class="mono">Docker-Container + SQLite</span></td><td>Von PC und Handy erreichbar, Daten bleiben zu Hause, Installation als Unraid-App</td><td>Absicherung nötig (siehe unten)</td><td class="yes"><span class="mono">/mnt/user/appdata/kontor</span></td></tr>
           <tr><td><b>Cloud-Web-App</b><br><span class="mono">Hosting + Login</span></td><td>Überall verfügbar, mehrere Nutzer einfach</td><td>Laufende Kosten, Datenschutz, Sicherheit sehr wichtig</td><td>Beim Hoster</td></tr>
         </tbody>
       </table>
@@ -359,7 +359,7 @@ footer { color: var(--muted); font-size: 13px; }
       var v = state[card.getAttribute("data-id")] || "open";
       groups[v].push(card.querySelector("h3").textContent);
     });
-    return "Brainstorming Finanzmanager – meine Prioritäten\n" +
+    return "Brainstorming Kontor – meine Prioritäten\n" +
       "Muss: " + (groups.must.join(", ") || "–") + "\n" +
       "Soll: " + (groups.should.join(", ") || "–") + "\n" +
       "Später: " + (groups.later.join(", ") || "–") + "\n" +

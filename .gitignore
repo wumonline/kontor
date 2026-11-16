@@ -13,6 +13,7 @@ import-test/
 *.mt940
 transactions_*.csv
 finanzmanager-backup*.json
+kontor-backup*.json
 
 # Laufzeitdaten des Servers (Daten, Sicherungen, FinTS-Zustand)
 data/
