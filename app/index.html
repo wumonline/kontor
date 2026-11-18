@@ -935,6 +935,23 @@ function acctInfo(a) {
   }
   return parts.join(' · ');
 }
+/* Kategorien sind hierarchisch („Nebenk. Wohnung:Strom“). Eine Oberkategorie umfasst alle Unterkategorien. */
+const catIn = (c, f) => !!c && (c === f || c.startsWith(f + ':'));
+const txInCat = (t, f) => catIn(t.category, f) || (t.splits || []).some(x => !x.transfer && catIn(x.category, f));
+/* Alle Kategorien samt Oberkategorien, nach Ebenen sortiert: [{ c, depth, kids }] */
+function catTree() {
+  const set = new Set();
+  for (const c of allCategories()) { const p = c.split(':'); for (let i = 1; i <= p.length; i++) set.add(p.slice(0, i).join(':')); }
+  const list = [...set].sort((a, b) => {
+    const x = a.split(':'), y = b.split(':');
+    for (let i = 0; i < Math.min(x.length, y.length); i++) { const d = x[i].localeCompare(y[i], 'de'); if (d) return d; }
+    return x.length - y.length;
+  });
+  return list.map(c => ({ c, depth: c.split(':').length - 1, kids: list.some(x => x.startsWith(c + ':')) }));
+}
+function catFilterOptions(cur) {
+  return catTree().map(({ c, depth, kids }) => `<option value="${esc(c)}" ${c === cur ? 'selected' : ''}>${'\u00a0'.repeat(depth * 5)}${esc(depth ? c.split(':').pop() : c)}${kids ? ' (gesamt)' : ''}</option>`).join('');
+}
 const years = () => [...new Set(DB.tx.map(t => t.date.slice(0, 4)))].sort().reverse();
 function allCategories() {
   const set = new Set(Object.keys(DB.categories));
@@ -3169,10 +3186,10 @@ function catDonuts(byCat) {
   if (!ranked.length && !byCat[NONE]) return '<p class="muted">Keine Ausgaben in diesem Jahr.</p>';
   const color = {}; ranked.slice(0, 7).forEach(([c], i) => color[c] = `var(--c${i + 1})`);
   const slices = withNone => {
-    const s = ranked.slice(0, 7).map(([c, v]) => ({ name: c, v, fill: color[c] }));
+    const s = ranked.slice(0, 7).map(([c, v]) => ({ name: c, cat: c, v, fill: color[c] }));
     const rest = ranked.slice(7).reduce((a, [, v]) => a + v, 0);
     if (rest) s.push({ name: `Sonstige (${ranked.length - 7})`, v: rest, fill: 'var(--c-other)' });
-    if (withNone && byCat[NONE] > 0) s.push({ name: NONE, v: byCat[NONE], fill: 'url(#hatch-none)', none: true });
+    if (withNone && byCat[NONE] > 0) s.push({ name: NONE, cat: '__none', v: byCat[NONE], fill: 'url(#hatch-none)', none: true });
     return s;
   };
   return `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><pattern id="hatch-none" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
@@ -3193,7 +3210,7 @@ function donut(title, centerLabel, s) {
       paths += `<path d="M ${pt(R, a0)} A ${R} ${R} 0 ${big} 1 ${pt(R, a1)} L ${pt(r, a1)} A ${r} ${r} 0 ${big} 0 ${pt(r, a0)} Z" fill="${x.fill}">${tip}</path>`; }
     a0 = a1;
   }
-  const legend = s.map(x => `<li${x.none ? ' class="none"' : ''}><i style="background:${x.none ? 'var(--c-none-bg)' : x.fill}"></i><span class="name">${esc(x.name)}</span>
+  const legend = s.map(x => `<li${x.none ? ' class="none"' : ''}><i style="background:${x.none ? 'var(--c-none-bg)' : x.fill}"></i><span class="name">${x.cat ? `<a href="#buchungen" data-catjump="${esc(x.cat)}" data-catyear="${esc(UI.year)}" title="Buchungen ${esc(x.name)} ${esc(UI.year)}">${esc(x.name)}</a>` : esc(x.name)}</span>
     <span class="num">${money(x.v)}</span><span class="num muted">${total ? Math.round(x.v / total * 100) : 0} %</span></li>`).join('');
   return `<figure class="donut"><figcaption>${esc(title)}</figcaption>
     <div class="donut-body"><svg viewBox="0 0 200 200" role="img" aria-label="${esc(title)}, ${money(total)}">${paths}
@@ -3215,7 +3232,7 @@ function currentTxList() {
   return DB.tx.filter(t =>
     (!set || set.has(t.acct)) &&
     (!f.month || t.date.startsWith(f.month)) &&
-    (!f.cat || (f.cat === '__none' ? isUncategorized(t) : f.cat === '__xfer' ? (t.transfer && t.transfer !== t.acct) : f.cat === '__xhint' ? !!transferHint(t, UI.xidx || (UI.xidx = xferIndex())) : (t.category === f.cat || (t.splits || []).some(s => s.category === f.cat)))) &&
+    (!f.cat || (f.cat === '__none' ? isUncategorized(t) : f.cat === '__xfer' ? (t.transfer && t.transfer !== t.acct) : f.cat === '__xhint' ? !!transferHint(t, UI.xidx || (UI.xidx = xferIndex())) : txInCat(t, f.cat))) &&
     (!f.tag || (f.tag === '__none' ? !(t.tags || []).length : (t.tags || []).includes(f.tag))) &&
     (!f.q || (displayPayee(t) + ' ' + t.memo + ' ' + t.category + ' ' + (t.tags || []).join(' ') + ' ' + (t.amount / 100).toFixed(2).replace('.', ',')).toLowerCase().includes(f.q.toLowerCase())));
 }
@@ -3265,7 +3282,7 @@ Views.buchungen = () => {
       <div class="row">
         <select id="f-acct" aria-label="Konto oder Kontogruppe"><option value="">Alle Konten</option>${acctFilterOptions(f.acct)}</select>
         <select id="f-month" aria-label="Zeitraum"><option value="">Alle Zeiträume</option>${monthOpts}</select>
-        <select id="f-cat" aria-label="Kategorie"><option value="">Alle Kategorien</option><option value="__none" ${f.cat === '__none' ? 'selected' : ''}>Ohne Kategorie</option><option value="__xfer" ${f.cat === '__xfer' ? 'selected' : ''}>Nur Umbuchungen</option><option value="__xhint" ${f.cat === '__xhint' ? 'selected' : ''}>Mögliche Umbuchungen</option>${cats.map(c => `<option ${c === f.cat ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+        <select id="f-cat" aria-label="Kategorie"><option value="">Alle Kategorien</option><option value="__none" ${f.cat === '__none' ? 'selected' : ''}>Ohne Kategorie</option><option value="__xfer" ${f.cat === '__xfer' ? 'selected' : ''}>Nur Umbuchungen</option><option value="__xhint" ${f.cat === '__xhint' ? 'selected' : ''}>Mögliche Umbuchungen</option>${catFilterOptions(f.cat)}</select>
         <select id="f-tag" aria-label="Tag"><option value="">Alle Tags</option><option value="__none" ${f.tag === '__none' ? 'selected' : ''}>Ohne Tag</option>${DB.tags.map(g => `<option ${g === f.tag ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select>
         <input id="f-q" type="search" placeholder="Suche (Empfänger, Memo, Tag, Betrag)" value="${esc(f.q)}" style="flex:1 1 200px">
         ${f.acct || f.month || f.cat || f.tag || f.q ? '<button id="f-reset">Filter löschen</button>' : ''}
@@ -3333,9 +3350,10 @@ Views.kategorien = () => {
     return `<div class="panel"><div class="row spread"><h2>${title}</h2><b class="num">${money(sum)}</b></div>
       ${e.map(([n, v]) => {
         const subs = Object.entries(v.subs).sort((a, b) => b[1] - a[1]);
-        const head = `<div class="cat-row"><span class="name">${esc(n)}</span><div class="bar ${cls}"><span style="width:${(v.total / e[0][1].total * 100).toFixed(1)}%"></span></div><span class="num" style="text-align:right">${money(v.total)}</span></div>`;
+        const jump = c => c === 'Ohne Kategorie' ? '__none' : c;
+        const head = `<div class="cat-row"><span class="name"><a href="#buchungen" data-catjump="${esc(jump(n))}" data-catyear="${esc(UI.year)}" title="Buchungen ${esc(n)}${subs.length > 1 ? ' mit allen Unterkategorien' : ''}">${esc(n)}</a></span><div class="bar ${cls}"><span style="width:${(v.total / e[0][1].total * 100).toFixed(1)}%"></span></div><span class="num" style="text-align:right">${money(v.total)}</span></div>`;
         return subs.length > 1 || subs[0][0] !== n
-          ? `<details><summary>${head}</summary><div style="padding-left:18px">${subs.map(([s, a]) => `<div class="cat-row"><span class="name muted">${esc(s.split(':').slice(1).join(':') || s)}</span><span></span><span class="num muted" style="text-align:right">${money(a)}</span></div>`).join('')}</div></details>`
+          ? `<details><summary>${head}</summary><div style="padding-left:18px">${subs.map(([s, a]) => `<div class="cat-row"><span class="name muted"><a href="#buchungen" data-catjump="${esc(jump(s))}" data-catyear="${esc(UI.year)}" class="muted">${esc(s.split(':').slice(1).join(':') || s)}</a></span><span></span><span class="num muted" style="text-align:right">${money(a)}</span></div>`).join('')}</div></details>`
           : head;
       }).join('') || '<p class="muted">Keine Buchungen.</p>'}</div>`;
   };
@@ -4532,6 +4550,7 @@ document.addEventListener('click', e => {
   }
   if (t.dataset.tagdelyes) { const n = deleteTag(t.dataset.tagdelyes); save(); render(); return toast(`Tag gelöscht${n ? ` und bei ${n} Buchungen entfernt` : ''}.`); }
   if (t.dataset.acct) { UI.f = Object.assign(NOFILTER(), { acct: t.dataset.acct }); }
+  else if (t.dataset.catjump) { UI.f = Object.assign(NOFILTER(), { cat: t.dataset.catjump, month: t.dataset.catyear || '' }); UI.limit = 150; }
   else if (t.dataset.uncat) { UI.f = Object.assign(NOFILTER(), { cat: '__none' }); }
   else if (t.id === 'f-reset') { UI.f = NOFILTER(); render(); }
   else if (t.id === 'more') { UI.limit += 150; render(); }
