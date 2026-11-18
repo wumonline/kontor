@@ -10,7 +10,8 @@ Verträge und Abos, Kredite, Depot mit aktuellen Kursen. Die Daten bleiben auf d
 - **Umbuchungen** zwischen eigenen Konten, automatisch verknüpft und abgeglichen
 - **Kategorien, Tags und Regeln** für die automatische Zuordnung; Tags für viele Buchungen auf einmal per Mehrfachauswahl
 - **Kontogruppen** nach Kontoart oder selbst angelegt, mit Summen und als Buchungsfilter
-- **Sparkonten** mit Zinssatz-Verlauf und Zinshochrechnung, **Rentenkonten** mit Auszahlungstermin
+- **Sparkonten** mit Zinssatz-Verlauf und Zinshochrechnung, **Rentenkonten** mit Auszahlungstermin, Fondsguthaben und Umbuchung der Beiträge aus Sammelabbuchungen
+- **Geldfluss** als Sankey-Diagramm: Einnahmen → Konten → Ausgaben
 - **Übersicht** mit Einnahmen/Ausgaben pro Monat und Ausgaben nach Kategorie
 - **Einstellungen** für Schriftgröße, Hell/Dunkel und Farbschema (pro Browser)
 - **Verträge und Abos** mit Kündigungsfristen, Erkennung aus wiederkehrenden Zahlungen

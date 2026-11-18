@@ -243,6 +243,16 @@ tr.picked td { background: var(--accent-soft); }
 tr.grp td { background: var(--bg); font-weight: 600; font-size: 0.857rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
 tr.grp td.num { text-transform: none; letter-spacing: 0; color: var(--fg); }
 .rates td input { width: 100%; }
+.sankey { display: block; }
+.sankey .link { fill: none; stroke-opacity: .32; transition: stroke-opacity .15s; }
+.sankey .link:hover, .sankey .link.hot { stroke-opacity: .7; }
+.sankey .link.k-in { stroke: var(--pos); } .sankey .link.k-x { stroke: var(--tin); } .sankey .link.k-out { stroke: var(--minus); } .sankey .link.k-keep { stroke: var(--c4); } .sankey .link.k-res { stroke: var(--muted); }
+.sankey rect.node { fill: var(--fg); rx: 2px; }
+.sankey rect.node.acct { fill: var(--accent); }
+.sankey text { fill: var(--fg); font-size: 0.857rem; paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
+.sankey text .amt { fill: var(--muted); }
+.sankey g.n:hover text { font-weight: 600; }
+.legend i.k-in { background: var(--pos); } .legend i.k-x { background: var(--tin); } .legend i.k-out { background: var(--minus); } .legend i.k-keep { background: var(--c4); } .legend i.k-res { background: var(--muted); }
 @media (max-width: 760px) {
   .app { grid-template-columns: 1fr; }
   .nav { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 12px 16px; gap: 8px; }
@@ -260,6 +270,7 @@ tr.grp td.num { text-transform: none; letter-spacing: 0; color: var(--fg); }
     <div class="brand">Kontor<small id="brand-ver"></small></div>
     <nav id="nav">
       <a href="#uebersicht">Übersicht</a>
+      <a href="#geldfluss">Geldfluss</a>
       <a href="#buchungen">Buchungen</a>
       <a href="#kategorien">Kategorien</a>
       <a href="#regeln">Regeln</a>
@@ -362,6 +373,8 @@ const Server = {
     if (j.data) { DB = ensureModel(j.data); Store.local(DB); }
     else if (DB.tx.length || Object.keys(DB.accounts).length) { this.queue(DB); toast('Deine Daten aus diesem Browser werden jetzt auf dem Server gespeichert.', null, 8000); }
     updateFoot(); render(); Drop.start();
+    // Kurse für Fonds in Rentenverträgen, höchstens alle 15 Minuten
+    const age = quoteAge(); if (pensionIsins().length && (!age || Date.now() - Date.parse(age) > 15 * 60e3)) setTimeout(() => refreshQuotes(true), 1500);
   },
   queue(d) {
     if (!this.ok || this.conflict) return;
@@ -845,6 +858,58 @@ function interestYear(a, year) {
   return { sofar: Math.round(sofar), total: Math.round(total) };
 }
 const PAYOUT = { once: 'Einmalzahlung', monthly: 'Monatliche Rente' };
+/* Fondsguthaben eines Rentenvertrags: Anteile von Hand (aus der Jahresmitteilung), bewertet mit dem
+   aktuellen Kurs vom Server, wenn er neuer ist als der Stichtag, sonst mit dem eingetragenen Kurs. */
+function pensionValue(a) {
+  const funds = ((a.pension || {}).funds || []).filter(f => f.units > 0);
+  if (!funds.length) return null;
+  let value = 0, live = false, date = '';
+  for (const f of funds) {
+    const q = ((DB.securities || {})[f.isin] || {}).quote, qd = q && q.time ? String(q.time).slice(0, 10) : '';
+    const useQ = q && q.price != null && q.currency === 'EUR' && (!f.date || qd >= f.date);
+    value += Math.round(f.units * (useQ ? q.price : f.price || 0) * 100);
+    if (useQ) live = true;
+    const d = useQ ? qd : f.date || ''; if (d > date) date = d;
+  }
+  return { value, live, date, units: funds.reduce((x, f) => x + f.units, 0), n: funds.length };
+}
+const pensionIsins = () => [...new Set(Object.values(DB.accounts).filter(a => a.type === 'Pens').flatMap(a => ((a.pension || {}).funds || []).map(f => f.isin)).filter(i => /^[A-Z]{2}[A-Z0-9]{9}\d$/.test(i || '')))];
+/* Beiträge aus Sammelabbuchungen: Buchungen in anderen Konten mit der Vertragsnummer im Text.
+   Steht hinter der Nummer ein Betrag (z. B. „12.00038894 51,06 21.90634859 17,22“), gehört nur dieser Teil zum Vertrag. */
+function pensionPayments(a) {
+  const no = ((a.pension || {}).contract || '').trim(); if (no.length < 4) return [];
+  const re = new RegExp(no.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\s+(\\d{1,3}(?:\\.\\d{3})*,\\d{2})(?!\\d)');
+  const out = [];
+  for (const t of DB.tx) {
+    if (t.acct === a.name || t.gen || t.amount >= 0) continue;
+    const text = `${t.payee || ''} ${t.payeeOrig || ''} ${t.memo || ''}`; if (!text.includes(no)) continue;
+    const m = re.exec(t.memo || ''), share = m ? Math.round(parseFloat(m[1].replace(/\./g, '').replace(',', '.')) * 100) : -t.amount;
+    const done = t.transfer === a.name || (t.splits || []).some(x => x.transfer === a.name);
+    const blocked = !done && (!!t.transfer || (t.splits || []).length > 0 || share > -t.amount);
+    out.push({ t, share: Math.min(share, -t.amount), done, blocked });
+  }
+  return out.sort((x, y) => x.t.date.localeCompare(y.t.date));
+}
+/* Beiträge auf das Rentenkonto umbuchen: ganzer Betrag als Umbuchung, Teilbetrag als Aufteilung
+   (Umbuchungsteil plus Rest mit der bisherigen Kategorie). Im Rentenkonto entsteht jeweils die Gegenbuchung. */
+function bookPensionPayments(name) {
+  const a = DB.accounts[name], list = pensionPayments(a).filter(p => !p.done && !p.blocked);
+  if (!list.length) return 0;
+  const no = a.pension.contract.trim();
+  for (const { t, share } of list) {
+    const c = { id: ++DB.seq, imp: null, key: 'gen|' + t.key + '|' + name + '|' + (-share), acct: name, date: t.date, amount: share,
+      payee: t.payee, memo: 'Beitrag ' + no, number: '', cleared: '', category: '', cls: '', transfer: t.acct, splits: [], tags: (t.tags || []).slice(), gen: t.id };
+    if (share === -t.amount) { t.transfer = name; t.category = ''; c.link = t.id; t.link = c.id; }
+    else {
+      t.splits = [{ category: '', transfer: name, cls: '', memo: 'Beitrag ' + no, amount: -share },
+        { category: t.category || '', transfer: null, cls: '', memo: '', amount: t.amount + share }];
+      t.category = '';
+    }
+    delete t.byRule; DB.tx.push(c);
+  }
+  DB.tx.sort((x, y) => x.date.localeCompare(y.date) || x.id - y.id);
+  return list.length;
+}
 function untilText(d) {
   const a = new Date(TODAY), b = new Date(d); let m = (b.getFullYear() - a.getFullYear()) * 12 + b.getMonth() - a.getMonth();
   if (b.getDate() < a.getDate()) m--;
@@ -865,6 +930,8 @@ function acctInfo(a) {
     if (!p.date) parts.push('Auszahlungstermin fehlt');
     else parts.push(`${p.date <= TODAY ? 'Auszahlung seit' : 'Auszahlung am'} ${dDE(p.date)}${p.date > TODAY ? ` (${untilText(p.date)})` : ''}`
       + (p.amount ? ` · ${p.kind === 'monthly' ? money(p.amount) + ' im Monat' : 'erwartet ' + money(p.amount)}` : ''));
+    const v = pensionValue(a);
+    if (v) parts.push(`Fondsguthaben ${money(v.value)}${v.date ? (v.live ? ' (Kurs vom ' : ' (Stand ') + dDE(v.date) + ')' : ''}`);
   }
   return parts.join(' · ');
 }
@@ -904,7 +971,7 @@ function openTx(id, preset) {
 function openAcct(name) {
   const a = name ? DB.accounts[name] : null;
   ED = { mode: 'acct', orig: name || null, name: a ? a.name : '', type: a ? a.type : 'Bank', institute: a ? a.institute : '', opening: a ? a.opening : 0,
-    rates: (a && a.rates || []).map(r => ({ from: r.from, rate: r.rate })), pension: Object.assign({ date: '', kind: 'once', amount: 0 }, a && a.pension) };
+    rates: (a && a.rates || []).map(r => ({ from: r.from, rate: r.rate })), pension: Object.assign({ date: '', kind: 'once', amount: 0, contract: '' }, a && a.pension, { funds: ((a && a.pension && a.pension.funds) || []).map(f => Object.assign({}, f)) }) };
   showDialog();
 }
 function showDialog() {
@@ -1101,9 +1168,42 @@ function acctExtras(e) {
         <label class="field"><span>Art der Auszahlung</span><select id="pe-kind">${Object.entries(PAYOUT).map(([k, l]) => `<option value="${k}" ${k === p.kind ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
         <label class="field"><span>${p.kind === 'monthly' ? 'Rente im Monat in €' : 'Erwarteter Betrag in €'}</span><input type="text" id="pe-amount" inputmode="decimal" value="${p.amount ? amtDE(p.amount) : ''}" placeholder="optional"></label>
       </div>
-      <p class="muted">${p.date ? (p.date > TODAY ? `Auszahlung ${untilText(p.date)}.` : 'Der Termin ist erreicht.') : 'Der Termin erscheint in der Übersicht und unter Konten & Daten.'}</p></div>`;
+      <p class="muted">${p.date ? (p.date > TODAY ? `Auszahlung ${untilText(p.date)}.` : 'Der Termin ist erreicht.') : 'Der Termin erscheint in der Übersicht und unter Konten & Daten.'}</p></div>
+    ${pensionFundsForm(e)}${pensionPayForm(e)}`;
   }
   return '';
+}
+/* Fondsanteile von Hand, z. B. aus der jährlichen Mitteilung des Versicherers */
+function pensionFundsForm(e) {
+  const fs = e.pension.funds, num = (v, d) => v === '' || v == null || isNaN(v) ? '' : (+v).toLocaleString('de-DE', { maximumFractionDigits: d, useGrouping: false });
+  const v = e.orig && DB.accounts[e.orig] ? pensionValue(Object.assign({}, DB.accounts[e.orig], { pension: { funds: fs.filter(f => f.units > 0 && !isNaN(f.units)) } })) : null;
+  return `<div class="splits"><div class="row spread"><h3>Fondsguthaben</h3><span class="muted">${v ? money(v.value) + (v.live ? ' zum aktuellen Kurs' : '') : ''}</span></div>
+    <p class="muted">Trage die Anteile aus der jährlichen Mitteilung ein. Ist eine ISIN angegeben, holt der Kontor-Server den aktuellen Kurs (nur die ISIN wird übertragen); bis dahin gilt dein Kurs.</p>
+    ${fs.length ? `<div class="table-wrap"><table class="rates"><thead><tr><th>Fonds</th><th>ISIN</th><th>Anteile</th><th>Kurs in €</th><th>Stand</th><th></th></tr></thead><tbody>
+    ${fs.map((f, i) => `<tr><td><input type="text" id="pf-name-${i}" value="${esc(f.name || '')}" placeholder="Name des Fonds" aria-label="Fonds, Zeile ${i + 1}"></td>
+      <td><input type="text" id="pf-isin-${i}" value="${esc(f.isin || '')}" placeholder="LU…" style="min-width:130px" aria-label="ISIN, Zeile ${i + 1}"></td>
+      <td><input type="text" id="pf-units-${i}" inputmode="decimal" value="${num(f.units, 6)}" style="min-width:90px" aria-label="Anteile, Zeile ${i + 1}"></td>
+      <td><input type="text" id="pf-price-${i}" inputmode="decimal" value="${num(f.price, 4)}" style="min-width:80px" aria-label="Kurs, Zeile ${i + 1}"></td>
+      <td><input type="date" id="pf-date-${i}" value="${esc(f.date || '')}" aria-label="Stand, Zeile ${i + 1}"></td>
+      <td><button type="button" class="icon" data-ed="rmfund" data-i="${i}" aria-label="Zeile entfernen">✕</button></td></tr>`).join('')}</tbody></table></div>` : ''}
+    <div><button type="button" data-ed="addfund">+ Fonds hinzufügen</button></div></div>`;
+}
+/* Beiträge: Vertragsnummer und Umbuchung der passenden Abbuchungen */
+function pensionPayForm(e) {
+  const c = (e.pension.contract || '').trim(), a = e.orig && DB.accounts[e.orig];
+  let info = '<p class="muted">Steht die Vertragsnummer im Verwendungszweck deiner Abbuchungen, findet Kontor die Beiträge. Fasst eine Abbuchung mehrere Verträge zusammen, wird nur der Betrag hinter dieser Nummer umgebucht; der Rest behält seine Kategorie.</p>';
+  if (c.length >= 4 && a) {
+    const l = pensionPayments(Object.assign({}, a, { pension: Object.assign({}, a.pension, { contract: c }) }));
+    const open = l.filter(p => !p.done && !p.blocked), done = l.filter(p => p.done), blk = l.filter(p => p.blocked), sum = x => x.reduce((s, p) => s + p.share, 0);
+    info += l.length ? `<p>${l.length} ${l.length === 1 ? 'Beitrag' : 'Beiträge'} gefunden (${dDE(l[0].t.date)} bis ${dDE(l[l.length - 1].t.date)}).
+      ${done.length ? `${done.length} schon umgebucht (${money(sum(done))}). ` : ''}${open.length ? `<b>${open.length} offen, zusammen ${money(sum(open))}</b>, z. B. ${money(open[0].share)} von ${money(-open[0].t.amount)} am ${dDE(open[0].t.date)}.` : ''}
+      ${blk.length ? ` ${blk.length} übersprungen, weil sie schon aufgeteilt oder umgebucht sind.` : ''}</p>
+      ${open.length ? '<div><button type="button" class="primary" data-ed="penbook">Beiträge umbuchen</button></div>' : ''}`
+      : '<p class="muted">Keine Abbuchung mit dieser Nummer gefunden.</p>';
+  } else if (c.length >= 4) info += '<p class="muted">Speichere das Konto zuerst, dann kannst du die Beiträge umbuchen.</p>';
+  return `<div class="splits"><h3>Beiträge</h3>
+    <div class="form" style="padding-top:0"><label class="field"><span>Vertragsnummer</span><input type="text" id="pe-contract" value="${esc(e.pension.contract || '')}" placeholder="wie im Verwendungszweck, z. B. 12.00038894"></label></div>
+    ${info}</div>`;
 }
 /* Formularwerte des Kontodialogs in ED übernehmen (vor dem Neuzeichnen und beim Speichern) */
 function readAcct() {
@@ -1120,6 +1220,10 @@ function readAcct() {
   if (v('pe-date') !== undefined) {
     e.pension.date = v('pe-date'); e.pension.kind = v('pe-kind');
     try { e.pension.amount = Math.abs(QIF.amount(v('pe-amount') || '0')); } catch (err) { e.pension.amount = NaN; }
+    if (v('pe-contract') !== undefined) e.pension.contract = v('pe-contract').trim();
+    const dec = x => { let t = String(x || '').trim(); if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.'); return t === '' ? '' : +t; };
+    e.pension.funds = e.pension.funds.map((f, i) => v('pf-name-' + i) === undefined ? f : {
+      name: v('pf-name-' + i).trim(), isin: v('pf-isin-' + i).replace(/\s/g, '').toUpperCase(), units: dec(v('pf-units-' + i)), price: dec(v('pf-price-' + i)), date: v('pf-date-' + i) });
   }
 }
 function saveAcct() {
@@ -1135,7 +1239,11 @@ function saveAcct() {
   }
   if (type === 'Pens') {
     if (isNaN(e.pension.amount)) return toast('Betrag der Auszahlung nicht lesbar.');
-    pension = { date: e.pension.date || '', kind: e.pension.kind, amount: e.pension.amount || 0 };
+    const fs = e.pension.funds.filter(f => f.name || f.isin || f.units !== '' || f.price !== '');
+    if (fs.some(f => f.units === '' || isNaN(f.units) || f.units < 0 || (f.price !== '' && (isNaN(f.price) || f.price < 0)))) return toast('Bitte bei jedem Fonds die Anteile als Zahl eintragen, z. B. 110,3282.');
+    if (fs.some(f => f.isin && !/^[A-Z]{2}[A-Z0-9]{9}\d$/.test(f.isin))) return toast('Eine ISIN hat 12 Zeichen, z. B. LU0309483781.');
+    pension = { date: e.pension.date || '', kind: e.pension.kind, amount: e.pension.amount || 0, contract: e.pension.contract || '',
+      funds: fs.map(f => ({ name: f.name || f.isin, isin: f.isin, units: +f.units, price: f.price === '' ? 0 : +f.price, date: f.date || '' })) };
   }
   if (name !== e.orig && DB.accounts[name]) return toast('Ein Konto mit diesem Namen gibt es schon.');
   if (!e.orig) {
@@ -2993,6 +3101,11 @@ Views.uebersicht = () => {
         const v = dv.reduce((s, x) => s + x.value, 0), c = dv.reduce((s, x) => s + x.cost, 0), known = dv.every(x => x.known);
         return `<div class="kpi"><div class="label"><a href="#depot">Depot zum Kurswert</a></div><div class="value num">${known ? '' : '≈ '}${money(v)}</div><div class="sub ${moneyCls(v - c)}">${v - c >= 0 ? '+' : ''}${money(v - c)} zum Einstand</div></div>`;
       })()}
+      ${(() => {
+        const pv = Object.values(DB.accounts).filter(a => a.type === 'Pens' && !a.inactive).map(pensionValue).filter(Boolean);
+        if (!pv.length) return '';
+        return `<div class="kpi"><div class="label"><a href="#konten">Rentenverträge</a></div><div class="value num">${money(pv.reduce((s, x) => s + x.value, 0))}</div><div class="sub muted">Fondsguthaben${pv.some(x => x.live) ? ' zum aktuellen Kurs' : ''}</div></div>`;
+      })()}
       <div class="kpi"><div class="label">Einnahmen ${UI.year}</div><div class="value num">${money(sumIn)}</div></div>
       <div class="kpi"><div class="label">Ausgaben ${UI.year}</div><div class="value num">${money(sumOut)}</div></div>
       <div class="kpi"><div class="label">Sparquote ${UI.year}</div><div class="value num ${moneyCls(rate)}">${rate} %</div></div>
@@ -3232,6 +3345,147 @@ Views.kategorien = () => {
     <div class="cols">${block(groups.out, '', 'Ausgaben')}${block(groups.in, 'in', 'Einnahmen')}</div>`;
 };
 
+/* ---------- Geldfluss ----------
+   Woher das Geld kommt, über welche Konten es läuft und wohin es geht, als Sankey-Diagramm:
+   links Einnahmen nach Kategorie, in der Mitte die Konten in Reihenfolge der Umbuchungen, rechts die Ausgaben.
+   Was auf einem Konto bleibt, fließt nach „Auf den Konten geblieben“; wurde mehr ausgegeben als hereinkam,
+   kommt der Rest „Aus dem Kontostand“. Umbuchungen zählen netto je Kontopaar. */
+const FLOW_TOP_IN = 5, FLOW_TOP_OUT = 8;
+function flowData(period) {
+  const act = new Set(Object.values(DB.accounts).filter(a => !a.inactive && !loanOfAcct(a.name)).map(a => a.name));
+  const cat = {}, xfer = {};
+  const addX = (a, b, v) => { const k = a + '\u0000' + b; xfer[k] = (xfer[k] || 0) + v; };
+  const addC = (a, c, v) => { const m = cat[a] || (cat[a] = {}); m[c] = (m[c] || 0) + v; };
+  for (const t of DB.tx) {
+    if (!t.date.startsWith(period) || t.date > TODAY || !act.has(t.acct)) continue;
+    const parts = t.splits && t.splits.length ? t.splits.map(x => ({ transfer: x.transfer, cat: x.category, amount: x.amount })) : [{ transfer: t.transfer, cat: t.category, amount: t.amount }];
+    for (const q of parts) {
+      if (q.transfer) {
+        if (q.transfer === t.acct) continue;                       // Eröffnungssaldo
+        if (q.amount < 0) addX(t.acct, q.transfer, -q.amount);      // jede Umbuchung nur von der abgebenden Seite zählen
+        else if (!act.has(q.transfer)) addX(q.transfer, t.acct, q.amount);
+        continue;
+      }
+      addC(t.acct, (q.cat || 'Ohne Kategorie').split(':')[0].trim() || 'Ohne Kategorie', q.amount);
+    }
+  }
+  // Umbuchungen netto je Kontopaar
+  const links = [], seen = new Set();
+  for (const k of Object.keys(xfer)) {
+    const [a, b] = k.split('\u0000'), pk = [a, b].sort().join('\u0000'); if (seen.has(pk)) continue; seen.add(pk);
+    const net = (xfer[a + '\u0000' + b] || 0) - (xfer[b + '\u0000' + a] || 0);
+    if (net > 0) links.push({ from: a, to: b, v: net, kind: 'x' }); else if (net < 0) links.push({ from: b, to: a, v: -net, kind: 'x' });
+  }
+  // Kategorien: netto je Konto und Kategorie; die größten einzeln, der Rest gesammelt
+  const inTot = {}, outTot = {};
+  for (const [a, m] of Object.entries(cat)) for (const [c, v] of Object.entries(m)) { if (v > 0) inTot[c] = (inTot[c] || 0) + v; else if (v < 0) outTot[c] = (outTot[c] || 0) - v; }
+  const top = (tot, n) => new Set(Object.entries(tot).sort((x, y) => y[1] - x[1]).slice(0, Object.keys(tot).length > n + 1 ? n : n + 1).map(([c]) => c));
+  const tin = top(inTot, FLOW_TOP_IN), tout = top(outTot, FLOW_TOP_OUT);
+  const agg = {};
+  for (const [a, m] of Object.entries(cat)) for (const [c, v] of Object.entries(m)) {
+    if (v > 0) { const n = 'in:' + (tin.has(c) ? c : 'Sonstige Einnahmen'); agg[n + '\u0000' + a] = (agg[n + '\u0000' + a] || 0) + v; }
+    else if (v < 0) { const n = 'out:' + (tout.has(c) ? c : 'Sonstige Ausgaben'); agg[a + '\u0000' + n] = (agg[a + '\u0000' + n] || 0) - v; }
+  }
+  for (const [k, v] of Object.entries(agg)) { const [f, t] = k.split('\u0000'); links.push({ from: f, to: t, v, kind: f.startsWith('in:') ? 'in' : 'out' }); }
+  // Ausgleich je Konto: was blieb oder aus dem Bestand kam
+  const accts = new Set(); for (const l of links) for (const n of [l.from, l.to]) if (act.has(n)) accts.add(n);
+  for (const a of accts) {
+    const inn = links.filter(l => l.to === a).reduce((x, l) => x + l.v, 0), out = links.filter(l => l.from === a).reduce((x, l) => x + l.v, 0);
+    if (inn > out) links.push({ from: a, to: 'keep', v: inn - out, kind: 'keep' });
+    else if (out > inn) links.push({ from: 'res', to: a, v: out - inn, kind: 'res' });
+  }
+  return { links: links.filter(l => l.v > 0), accts, act, inTot, outTot };
+}
+/* Verfügbare Breite im Panel: Hauptbereich ohne seinen Innenabstand und ohne den des Panels */
+function flowWidth() {
+  const m = $('#main'); if (!m) return 1100;
+  const cs = getComputedStyle(m); return Math.floor(m.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - 2 * 19);
+}
+const flowLabel = n => n === 'keep' ? 'Auf den Konten geblieben' : n === 'res' ? 'Aus dem Kontostand' : n.replace(/^(in|out):/, '');
+function sankeySVG(fd) {
+  const { links, act } = fd; if (!links.length) return '';
+  const isAcct = n => act.has(n);
+  // Spalten: Quellen 0, Konten nach längstem Umbuchungsweg, Ziele zuletzt
+  const preds = {}; for (const l of links) if (isAcct(l.from) && isAcct(l.to)) (preds[l.to] = preds[l.to] || []).push(l.from);
+  const rank = {}, visit = (n, stack) => {
+    if (rank[n] != null) return rank[n]; if (stack.has(n)) return 0;
+    stack.add(n); let r = 1; for (const p of preds[n] || []) r = Math.max(r, visit(p, stack) + 1); stack.delete(n); return rank[n] = r;
+  };
+  const names = [...new Set(links.flatMap(l => [l.from, l.to]))];
+  for (const n of names) if (isAcct(n)) visit(n, new Set());
+  const maxR = Math.max(1, ...Object.values(rank)), last = maxR + 1;
+  const col = n => isAcct(n) ? rank[n] : (links.some(l => l.from === n) ? 0 : last);
+  const nodes = {}; for (const n of names) nodes[n] = { n, c: col(n), inV: 0, outV: 0 };
+  for (const l of links) { nodes[l.from].outV += l.v; nodes[l.to].inV += l.v; }
+  for (const x of Object.values(nodes)) x.v = Math.max(x.inV, x.outV);
+  // Senkrechte Anordnung: Ausgleichsknoten zuletzt, sonst nach Größe
+  const cols = []; for (const x of Object.values(nodes)) (cols[x.c] = cols[x.c] || []).push(x);
+  // Breite wie der Platz auf dem Bildschirm, damit die Schrift nicht mitschrumpft
+  // mindestens 150 px je Spalte, damit die Kontonamen nicht in die nächste Spalte ragen
+  const PAD = 16, TOP = 10, MAXH = 560, L = 170, Rm = 210, NW = 14, W = Math.max(L + Rm + 145 * last, flowWidth());
+  const sumMax = Math.max(...cols.filter(Boolean).map(c => c.reduce((x, n) => x + n.v, 0)));
+  const nMax = Math.max(...cols.filter(Boolean).map(c => c.length));
+  const k = (MAXH - PAD * (nMax - 1)) / sumMax;
+  let H = 0;
+  cols.forEach((c, i) => {
+    if (!c) return;
+    c.sort((a, b) => ((a.n === 'keep' || a.n === 'res') - (b.n === 'keep' || b.n === 'res')) || b.v - a.v);
+    let y = TOP; for (const n of c) { n.h = Math.max(2, n.v * k); n.y = y; y += n.h + PAD; n.x = L + (W - L - Rm - NW) * i / last; }
+    H = Math.max(H, y - PAD + TOP);
+  });
+  // Bänder: Reihenfolge an den Knoten nach Lage der Gegenseite, damit sich wenig kreuzt
+  for (const x of Object.values(nodes)) { x.oy = x.y; x.iy = x.y; }
+  const ls = links.map(l => Object.assign({}, l, { s: nodes[l.from], t: nodes[l.to], w: Math.max(1, l.v * k) }));
+  ls.slice().sort((a, b) => a.t.y - b.t.y).forEach(l => { l.y0 = l.s.oy + l.w / 2; l.s.oy += l.w; });
+  ls.slice().sort((a, b) => a.s.y - b.s.y).forEach(l => { l.y1 = l.t.iy + l.w / 2; l.t.iy += l.w; });
+  const kindTxt = { in: 'Einnahme', x: 'Umbuchung', out: 'Ausgabe', keep: 'Geblieben', res: 'Aus dem Bestand' };
+  const paths = ls.sort((a, b) => b.w - a.w).map(l => {
+    const x0 = l.s.x + NW, x1 = l.t.x, mx = (x0 + x1) / 2;
+    return `<path class="link k-${l.kind}" d="M${x0.toFixed(1)},${l.y0.toFixed(1)} C${mx.toFixed(1)},${l.y0.toFixed(1)} ${mx.toFixed(1)},${l.y1.toFixed(1)} ${x1.toFixed(1)},${l.y1.toFixed(1)}" stroke-width="${l.w.toFixed(1)}" data-f="${esc(l.from)}" data-t="${esc(l.to)}"><title>${esc(flowLabel(l.from))} → ${esc(flowLabel(l.to))}: ${money(l.v)} (${kindTxt[l.kind]})</title></path>`;
+  }).join('');
+  const rects = Object.values(nodes).map(x => {
+    const right = x.c > 0 && x.c < last || x.c === last, tx = right ? x.x + NW + 6 : x.x - 6, ty = x.y + x.h / 2 + 4;
+    const amt = money(x.v).replace(/,\d\d\s?€/, ' €'), mid = x.c > 0 && x.c < last;
+    // Konten in der Mitte: Betrag in der zweiten Zeile, damit der Name nicht in die nächste Spalte ragt
+    const lbl = mid ? `<text x="${tx.toFixed(1)}" y="${(ty - 7).toFixed(1)}" text-anchor="start">${esc(flowLabel(x.n))}<tspan class="amt" x="${tx.toFixed(1)}" dy="1.15em">${amt}</tspan></text>`
+      : `<text x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" text-anchor="${right ? 'start' : 'end'}">${esc(flowLabel(x.n))} <tspan class="amt">${amt}</tspan></text>`;
+    const tip = `<title>${esc(flowLabel(x.n))}: ${money(x.v)}${x.inV && x.outV ? ` · herein ${money(x.inV)}, hinaus ${money(x.outV)}` : ''}</title>`;
+    return `<g class="n" data-n="${esc(x.n)}"><rect class="node${isAcct(x.n) ? ' acct' : ''}" x="${x.x.toFixed(1)}" y="${x.y.toFixed(1)}" width="${NW}" height="${x.h.toFixed(1)}">${tip}</rect>${lbl}</g>`;
+  }).join('');
+  return `<svg class="sankey" viewBox="0 0 ${W} ${Math.ceil(H)}" width="100%" style="min-width:${W}px" role="img" aria-label="Geldfluss von den Einnahmen über die Konten zu den Ausgaben">${paths}${rects}</svg>`;
+}
+Views.geldfluss = () => {
+  if (!DB.tx.length) return `<h1>Geldfluss</h1><div class="panel"><p class="muted">Noch keine Buchungen.</p></div>`;
+  const ys = years();
+  if (!UI.flowP || !ys.includes(UI.flowP.slice(0, 4))) UI.flowP = ys[0];
+  const p = UI.flowP, fd = flowData(p);
+  const opts = ys.map(y => `<optgroup label="${y}"><option value="${y}" ${p === y ? 'selected' : ''}>Ganzes Jahr ${y}</option>${MONTHS.map((m, i) => { const v = `${y}-${String(i + 1).padStart(2, '0')}`; return `<option value="${v}" ${p === v ? 'selected' : ''}>${m} ${y}</option>`; }).join('')}</optgroup>`).join('');
+  const sum = kind => fd.links.filter(l => l.kind === kind).reduce((x, l) => x + l.v, 0);
+  const inc = Object.values(fd.inTot).reduce((a, b) => a + b, 0), out = Object.values(fd.outTot).reduce((a, b) => a + b, 0), xf = sum('x');
+  const rows = fd.links.slice().sort((a, b) => b.v - a.v).map(l => `<tr><td>${esc(flowLabel(l.from))}</td><td>${esc(flowLabel(l.to))}</td><td class="muted">${{ in: 'Einnahme', x: 'Umbuchung', out: 'Ausgabe', keep: 'Geblieben', res: 'Aus dem Bestand' }[l.kind]}</td><td class="r num">${money(l.v)}</td></tr>`).join('');
+  return `<div class="row spread"><h1>Geldfluss</h1>
+      <label class="row">Zeitraum <select id="flow-period">${opts}</select></label></div>
+    <div class="kpis">
+      <div class="kpi"><div class="label">Einnahmen</div><div class="value num">${money(inc)}</div></div>
+      <div class="kpi"><div class="label">Zwischen Konten umgebucht</div><div class="value num">${money(xf)}</div></div>
+      <div class="kpi"><div class="label">Ausgaben</div><div class="value num">${money(out)}</div></div>
+      <div class="kpi"><div class="label">Auf den Konten geblieben</div><div class="value num ${moneyCls(sum('keep') - sum('res'))}">${money(sum('keep') - sum('res'))}</div></div>
+    </div>
+    <div class="panel"><div class="row spread"><h2>Von den Einnahmen über die Konten zu den Ausgaben</h2>
+      <div class="legend"><span><i class="k-in"></i>Einnahmen</span><span><i class="k-x"></i>Umbuchungen</span><span><i class="k-out"></i>Ausgaben</span><span><i class="k-keep"></i>Geblieben</span>${sum('res') ? '<span><i class="k-res"></i>Aus dem Bestand</span>' : ''}</div></div>
+      ${fd.links.length ? `<div class="table-wrap">${sankeySVG(fd)}</div>` : '<p class="muted">Keine Buchungen in diesem Zeitraum.</p>'}
+      <p class="muted">Die Breite jedes Bandes entspricht dem Betrag. Umbuchungen zählen netto: Geht Geld zwischen zwei Konten hin und her, zeigt das Band nur den Überschuss. Inaktive Konten und Kreditkonten erscheinen als Ziel oder Quelle. Die ${FLOW_TOP_IN} größten Einnahme- und ${FLOW_TOP_OUT} größten Ausgabenkategorien stehen einzeln. Fahre über ein Band, um den Betrag zu sehen.</p>
+      ${rows ? `<details class="sub-panel"><summary>Als Tabelle</summary><div class="table-wrap"><table><thead><tr><th>Von</th><th>Nach</th><th>Art</th><th class="r">Betrag</th></tr></thead><tbody>${rows}</tbody></table></div></details>` : ''}
+    </div>`;
+};
+/* Beim Überfahren eines Knotens seine Bänder hervorheben */
+document.addEventListener('mouseover', e => {
+  const g = e.target.closest && e.target.closest('.sankey g.n'); const svg = e.target.closest && e.target.closest('.sankey');
+  if (!svg) return;
+  svg.querySelectorAll('.link.hot').forEach(p => p.classList.remove('hot'));
+  if (g) svg.querySelectorAll('.link').forEach(p => { if (p.dataset.f === g.dataset.n || p.dataset.t === g.dataset.n) p.classList.add('hot'); });
+});
+
 /* ---------- Kredite: Diagramm, Tilgungsplan, Rechner ---------- */
 function balanceChart(l, base, sim) {
   const W = 720, H = 220, L = 74, R = 12, T = 12, B = 26;
@@ -3419,7 +3673,7 @@ function depotValue(acct) {
 const quoteAge = () => { const ts = Object.values(DB.securities || {}).map(s => s.fetched || '').sort(); return ts.length ? ts[ts.length - 1] : ''; };
 async function refreshQuotes(silent) {
   if (!Server.ok) { if (!silent) toast('Kurse holt der Kontor-Server. Öffne die App über den Server.'); return; }
-  const isins = [...new Set(Object.values(DB.accounts).filter(isDepot).flatMap(a => depotPositions(a.name).filter(p => p.open).map(p => p.isin)))];
+  const isins = [...new Set(Object.values(DB.accounts).filter(isDepot).flatMap(a => depotPositions(a.name).filter(p => p.open).map(p => p.isin)).concat(pensionIsins()))];
   if (!isins.length) return;
   UI.quoting = true; render();
   try {
@@ -3901,6 +4155,7 @@ document.addEventListener('change', e => {
     renameTag(from, to); save(); render(); toast(`Tag in „${to}“ umbenannt.`);
   }
   else if (t.id === 'f-acct') { UI.f.acct = t.value; UI.limit = 150; render(); }
+  else if (t.id === 'flow-period') { UI.flowP = t.value; render(); }
   else if (t.id === 'f-month') { UI.f.month = t.value; UI.limit = 150; render(); }
   else if (t.id === 'f-cat') { UI.f.cat = t.value; UI.limit = 150; render(); }
   else if (t.id === 'file' && t.files.length) { readFiles(t.files); t.value = ''; }
@@ -3995,7 +4250,7 @@ function dialogChange(t) {
   if (ED.mode === 'prefs') { if (/^pf-/.test(t.name)) { Prefs.set(t.name.slice(3), t.value); showDialog(); } return; }
   if (ED.mode === 'acct') {
     if (t.id === 'ac-inst' && t.value === '__new') { readAcct(); openInst(null, { back: Object.assign({}, ED) }); }
-    else if (t.id === 'ac-type' || t.id === 'pe-kind' || t.id === 'pe-date' || /^rt-/.test(t.id)) { readAcct(); showDialog(); }
+    else if (t.id === 'ac-type' || t.id === 'pe-kind' || t.id === 'pe-date' || t.id === 'pe-contract' || /^(rt|pf)-/.test(t.id)) { readAcct(); showDialog(); }
     return;
   }
   if (ED.mode === 'group') return;
@@ -4079,6 +4334,15 @@ function editorClick(t) {
     else if (a === 'toloan') { const n = ED.orig; closeDialog(); acctToLoan(n); }
     else if (a === 'addrate') { readAcct(); const last = ED.rates[ED.rates.length - 1]; ED.rates.push({ from: TODAY, rate: last ? last.rate : '' }); showDialog(); const el = $('#rt-rate-' + (ED.rates.length - 1)); if (el) el.focus(); }
     else if (a === 'rmrate') { readAcct(); ED.rates.splice(+t.dataset.i, 1); showDialog(); }
+    else if (a === 'addfund') { readAcct(); ED.pension.funds.push({ name: '', isin: '', units: '', price: '', date: TODAY }); showDialog(); const el = $('#pf-name-' + (ED.pension.funds.length - 1)); if (el) el.focus(); }
+    else if (a === 'rmfund') { readAcct(); ED.pension.funds.splice(+t.dataset.i, 1); showDialog(); }
+    else if (a === 'penbook') {
+      readAcct(); const name = ED.orig, acc = DB.accounts[name]; if (!acc) return;
+      const snap = JSON.stringify(DB.tx), prev = acc.pension;
+      acc.pension = Object.assign({}, acc.pension, { contract: ED.pension.contract });
+      const n = bookPensionPayments(name); save(); showDialog(); render();
+      toast(`${n} ${n === 1 ? 'Beitrag' : 'Beiträge'} auf „${name}“ umgebucht.`, { label: 'Rückgängig', run: () => { DB.tx = JSON.parse(snap); acc.pension = prev; save(); if (ED && ED.mode === 'acct') showDialog(); render(); toast('Rückgängig gemacht.'); } }, 12000);
+    }
     else if (a === 'unloan') { const l = loanOfAcct(ED.orig); if (l) { l.acct = ''; save(); } closeDialog(); render(); toast('Das Konto wird wieder bei den Konten geführt.'); }
     return;
   }
