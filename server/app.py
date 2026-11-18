@@ -258,7 +258,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == '/api/drop/pdf':
                 return self.send_json(200, drop.pdf_info(arg('box'), arg('name')))
             if path == '/api/archive/file':
-                name, data = drop.archive_read(arg('path'))
+                name, data = drop.archive_read(arg('path'), arg('kind'))
                 return self.send_file(name, data, arg('dl') == '1')
         except (FileNotFoundError, ValueError) as e:
             return self.send_json(404, {'error': str(e)})
@@ -278,7 +278,7 @@ class Handler(BaseHTTPRequestHandler):
                 drop.trash(body.get('box'), body.get('name'))
                 return self.send_json(200, {'ok': True})
             if path == '/api/archive/delete':
-                drop.archive_delete(body.get('path'))
+                drop.archive_delete(body.get('path'), body.get('kind') or '')
                 return self.send_json(200, {'ok': True})
         except (FileNotFoundError, ValueError) as e:
             return self.send_json(404, {'error': str(e)})
@@ -296,7 +296,8 @@ class Handler(BaseHTTPRequestHandler):
             if n > MAX_BODY:
                 return self.send_json(413, {'error': 'Datei zu groß'})
             try:
-                return self.send_json(200, drop.archive_upload((q.get('acct') or [''])[0], (q.get('name') or [''])[0], self.rfile.read(n)))
+                qa = lambda k: (q.get(k) or [''])[0]
+                return self.send_json(200, drop.archive_upload(qa('acct'), qa('name'), self.rfile.read(n), qa('kind'), qa('year')))
             except ValueError as e:
                 return self.send_json(400, {'error': str(e)})
         if path != '/api/data':

@@ -243,6 +243,15 @@ tr.picked td { background: var(--accent-soft); }
 tr.grp td { background: var(--bg); font-weight: 600; font-size: 0.857rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
 tr.grp td.num { text-transform: none; letter-spacing: 0; color: var(--fg); }
 .rates td input { width: 100%; }
+.date-wrap { display: inline-flex; gap: 4px; align-items: center; max-width: 100%; }
+.field .date-wrap { display: flex; }
+.date-wrap input.date { width: 8.6em; min-width: 0; flex: 1 1 auto; font-variant-numeric: tabular-nums; }
+input.date[aria-invalid="true"] { border-color: var(--minus); background: var(--warn-soft); }
+button.icon.cal { padding: 3px 6px; flex: none; }
+.files { display: flex; flex-wrap: wrap; gap: 6px; }
+.files .chip { display: inline-flex; gap: 6px; align-items: center; padding: 2px 4px 2px 10px; }
+.files .chip button { border: 0; background: none; padding: 0 4px; color: var(--muted); }
+button.clip { border: 0; background: none; padding: 0 2px; color: var(--muted); }
 .sankey { display: block; }
 .sankey .link { fill: none; stroke-opacity: .32; transition: stroke-opacity .15s; }
 .sankey .link:hover, .sankey .link.hot { stroke-opacity: .7; }
@@ -308,6 +317,62 @@ const ACCT_TYPES = { 'Bank': 'Girokonto', 'CCard': 'Kreditkarte', 'Cash': 'Barge
 const TYPE_GROUPS = { 'Bank': 'Girokonten', 'Oth T': 'Tagesgeld', 'Save': 'Sparkonten', 'CCard': 'Kreditkarten', 'Cash': 'Bargeld', 'Port': 'Depots', 'Pens': 'Rentenkonten', 'Oth A': 'Vermögen', 'Oth L': 'Verbindlichkeiten', 'Oth D': 'Sonstiges' };
 const typeGroup = t => t === 'Invst' ? 'Port' : TYPE_GROUPS[t] ? t : 'Oth D';
 const acctType = t => ACCT_TYPES[t] || t || '–';
+
+/* ---------- Datumsfelder ----------
+   Statt des Datumsfelds des Browsers ein Textfeld TT.MM.JJJJ mit Kalenderknopf. Eintippen geht frei:
+   „1.8.29“, „01.08.2029“, „01082029“, „1.8.“ (laufendes Jahr) oder JJJJ-MM-TT.
+   Nach außen liefert .value weiter JJJJ-MM-TT, damit der übrige Code unverändert bleibt. */
+const NATIVE_VALUE = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+function parseDateDE(s) {
+  s = String(s || '').trim(); if (!s) return '';
+  let d, m, y, x;
+  if ((x = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))) [, y, m, d] = x;
+  else if ((x = s.match(/^(\d{1,2})[.\/-](\d{1,2})(?:[.\/-](\d{2}|\d{4})?)?$/))) [, d, m, y] = x;
+  else if ((x = s.match(/^(\d{2})(\d{2})(\d{2}|\d{4})?$/))) [, d, m, y] = x;
+  else return null;
+  const cy = +TODAY.slice(0, 4);
+  y = y ? +y : cy; if (y < 100) y += y > cy % 100 + 30 ? 1900 : 2000;
+  d = +d; m = +m;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (y < 1900 || y > 2200 || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null;
+  return dt.toISOString().slice(0, 10);
+}
+const isoToDE = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '') ? `${v.slice(8, 10)}.${v.slice(5, 7)}.${v.slice(0, 4)}` : (v || '');
+function enhanceDates(root) {
+  if (!root) return;
+  for (const el of root.querySelectorAll('input[type="date"]')) {
+    const iso = NATIVE_VALUE.get.call(el);
+    el.type = 'text'; el.classList.add('date'); el.inputMode = 'numeric'; el.placeholder = 'TT.MM.JJJJ'; el.autocomplete = 'off'; el.maxLength = 10;
+    Object.defineProperty(el, 'value', {
+      configurable: true,
+      get() { const raw = NATIVE_VALUE.get.call(this).trim(); if (!raw) return ''; return parseDateDE(raw) || raw; },
+      set(v) { NATIVE_VALUE.set.call(this, isoToDE(v)); this.removeAttribute('aria-invalid'); }
+    });
+    el.value = iso;
+    const w = document.createElement('span'); w.className = 'date-wrap';
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'icon cal'; b.textContent = '📅';
+    b.setAttribute('aria-label', 'Kalender öffnen'); b.title = 'Kalender';
+    el.replaceWith(w); w.append(el, b);
+  }
+}
+/* Beim Verlassen des Felds: Schreibweise vereinheitlichen oder als ungültig markieren (vor allen anderen Handlern) */
+document.addEventListener('change', e => {
+  const el = e.target; if (!el.classList || !el.classList.contains('date')) return;
+  const raw = NATIVE_VALUE.get.call(el).trim(), iso = parseDateDE(raw);
+  if (iso) { NATIVE_VALUE.set.call(el, isoToDE(iso)); el.removeAttribute('aria-invalid'); }
+  else if (raw) { el.setAttribute('aria-invalid', 'true'); toast(`„${raw}“ ist kein gültiges Datum. Beispiele: 1.8.2029, 1.8.29, 01082029.`); }
+}, true);
+function openCalendar(btn) {
+  const el = btn.previousElementSibling; if (!el) return;
+  const r = btn.getBoundingClientRect(), p = document.createElement('input');
+  p.type = 'date'; p.tabIndex = -1;
+  p.style.cssText = `position:fixed;left:${r.left}px;top:${r.bottom}px;width:1px;height:1px;opacity:0;border:0;padding:0;pointer-events:none`;
+  const iso = el.value; if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) p.value = iso;
+  (el.closest('dialog') || document.body).appendChild(p);
+  p.addEventListener('change', () => { if (p.value) { el.value = p.value; el.dispatchEvent(new Event('change', { bubbles: true })); } p.remove(); });
+  p.addEventListener('blur', () => setTimeout(() => p.remove(), 500));
+  try { p.showPicker(); } catch (e) { p.remove(); el.focus(); }
+}
 
 /* ---------- Darstellung ----------
    Schriftgröße, Hell/Dunkel und Farbschema gelten pro Gerät und liegen im Browser, nicht in den Daten:
@@ -1002,6 +1067,7 @@ function showDialog() {
     $('#payeelist').innerHTML = p.map(x => `<option value="${esc(x)}">`).join('');
   }
   d.innerHTML = ED.mode === 'tx' ? txForm() : ED.mode === 'rule' ? ruleForm() : ED.mode === 'contract' ? contractForm() : ED.mode === 'loan' ? loanForm() : ED.mode === 'inst' ? instForm() : ED.mode === 'fints' ? fintsForm() : ED.mode === 'prefs' ? prefsForm() : ED.mode === 'group' ? groupForm() : acctForm();
+  enhanceDates(d);
   if (!d.open) d.showModal();
   const first = d.querySelector('[autofocus]'); if (first) first.focus();
   updateRest(); updateRulePreview(); updateContractPreview(); updateLoanPreview();
@@ -1042,6 +1108,9 @@ function txForm() {
         </tbody></table></div>
         <div class="row spread"><button type="button" data-ed="addsplit">+ Teil hinzufügen</button><span id="ed-rest" class="num"></span></div>
       </div>` : `<div><button type="button" class="linkish" data-ed="split">Auf mehrere Kategorien aufteilen</button></div>`}
+    <div class="splits"><div class="row spread"><h3>Belege</h3>
+      ${e.id ? `<label class="btn" for="ed-file">+ Datei anhängen</label><input type="file" id="ed-file" multiple hidden>` : '<span class="muted">Nach dem Speichern kannst du Dateien anhängen.</span>'}</div>
+      ${e.id && (DB.tx.find(x => x.id === e.id)?.files || []).length ? receiptChips(DB.tx.find(x => x.id === e.id), true) : e.id ? '<p class="muted">Noch keine Datei, z. B. die passende Rechnung.</p>' : ''}</div>
     ${e.id && DB.tx.find(x => x.id === e.id)?.imp ? '<p class="muted">Aus dem Import. Ein erneuter Import derselben Datei überschreibt deine Änderungen nicht.</p>' : ''}
     <div class="row spread ed-foot">
       <div class="row"><div class="row" id="ed-del-box">${e.id ? '<button type="button" class="danger" data-ed="del">Löschen</button>' : ''}</div>
@@ -1136,6 +1205,7 @@ function saveTx() {
 }
 function deleteTx(id) {
   const t = DB.tx.find(x => x.id === id); if (!t) return;
+  for (const f of (t.files || []).slice()) removeReceipt(t.id, f.id);
   const gone = [t.id, t.link].filter(Boolean);
   DB.tx = DB.tx.filter(x => !gone.includes(x.id));
   save(); closeDialog(); render();
@@ -2984,7 +3054,7 @@ function dropPanel() {
       ${s.inbox.map((r, i) => `<tr><td><span class="chip">${r.kind === 'csv' ? 'CSV' : r.kind === 'pdf' ? 'PDF' : '?'}</span> <a href="api/drop/file?box=inbox&name=${encodeURIComponent(r.name)}" target="_blank" rel="noopener">${esc(r.name)}</a><span class="sub">${new Date(r.mtime).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}</span></td>
         <td class="muted">${esc(r.reason || '')}</td>
         <td class="r"><div class="row nowrap" style="justify-content:flex-end">
-          ${r.kind === 'csv' ? `<button class="primary" data-inimport="${i}">Importieren …</button>` : r.kind === 'pdf' ? `${sel('in-acct-' + i, guess(r))}<button class="primary" data-instore="${i}">Ablegen</button>` : ''}
+          ${r.kind === 'csv' ? `<button class="primary" data-inimport="${i}">Importieren …</button>` : r.kind === 'pdf' ? `${sel('in-acct-' + i, guess(r))}<button class="primary" data-instore="${i}">Ablegen</button><button data-inrcpt="${i}" title="Kein Kontoauszug, sondern ein Beleg zu einer Buchung">Als Beleg …</button>` : ''}
           <button data-inretry="${i}" title="Erneut automatisch zuordnen, z. B. nachdem du beim Konto die IBAN eingetragen hast">Erneut prüfen</button>
           <button class="icon danger" data-intrash="${i}" title="In den Papierkorb des Servers" aria-label="Verwerfen">🗑</button></div></td></tr>`).join('')}
       </tbody></table></div>` : '<p class="pos">Die Inbox ist leer.</p>'}
@@ -3009,6 +3079,125 @@ const Files = {
   get(id) { return this.run('readonly', st => st.get(id)); },
   del(id) { return this.run('readwrite', st => st.delete(id)); }
 };
+/* ---------- Belege zu Buchungen ----------
+   Rechnungen usw. hängen an einer Buchung (t.files). Mit Server liegen sie dort unter „belege/<Konto>/<Jahr>“,
+   ohne Server in diesem Browser (IndexedDB), wie die Kontoauszüge. */
+const RCPT_MAX = 50 * 1024 * 1024;
+const kbText = n => n > 1048576 ? (n / 1048576).toFixed(1).replace('.', ',') + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+async function attachReceipt(txId, file) {
+  const t = DB.tx.find(x => x.id === txId); if (!t) return null;
+  if (file.size > RCPT_MAX) { toast(`${file.name} ist größer als 50 MB.`); return null; }
+  const id = 'b' + Date.now() + Math.floor(Math.random() * 1e6);
+  let srv = null;
+  try {
+    if (Server.ok) {
+      const r = await fetch(`api/archive/upload?kind=beleg&acct=${encodeURIComponent(t.acct)}&year=${t.date.slice(0, 4)}&name=${encodeURIComponent(file.name)}`, { method: 'PUT', body: file });
+      const j = await r.json(); if (!r.ok) throw new Error(j.error || 'HTTP ' + r.status); srv = j.path;
+    } else await Files.put(id, file);
+  } catch (e) { toast('Der Beleg konnte nicht gespeichert werden: ' + e.message); return null; }
+  t.files = (t.files || []).concat(Object.assign({ id, name: file.name, size: file.size, type: file.type || '', added: new Date().toISOString() }, srv ? { srv } : {}));
+  return id;
+}
+async function openReceipt(txId, fid, download) {
+  const t = DB.tx.find(x => x.id === txId), f = t && (t.files || []).find(x => x.id === fid); if (!f) return;
+  if (f.srv) {
+    if (!Server.ok) return toast('Der Beleg liegt auf deinem Server. Öffne die App über den Server.');
+    const url = `api/archive/file?kind=beleg&path=${encodeURIComponent(f.srv)}${download ? '&dl=1' : ''}`;
+    return download ? (location.href = url) : window.open(url, '_blank');
+  }
+  const blob = await Files.get(fid);
+  if (!blob) return toast('Der Beleg wurde in diesem Browser nicht gefunden.');
+  const url = URL.createObjectURL(blob); window.open(url, '_blank'); setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+async function removeReceipt(txId, fid) {
+  const t = DB.tx.find(x => x.id === txId), f = t && (t.files || []).find(x => x.id === fid); if (!f) return;
+  try {
+    if (f.srv) { if (!Server.ok) return toast('Der Beleg liegt auf deinem Server. Öffne die App über den Server.'); await Drop.api('archive/delete', { path: f.srv, kind: 'beleg' }); }
+    else await Files.del(fid);
+  } catch (e) { if (!/nicht im Archiv/.test(e.message)) return toast('Der Beleg konnte nicht entfernt werden: ' + e.message); }
+  t.files = t.files.filter(x => x.id !== fid); if (!t.files.length) delete t.files;
+}
+function receiptChips(t, withDelete) {
+  return `<div class="files">${(t.files || []).map(f => `<span class="chip" id="rf-${esc(f.id)}"><button type="button" class="linkish" data-rcptopen="${t.id}" data-fid="${esc(f.id)}" title="Öffnen">📎 ${esc(f.name)}</button><span class="muted">${kbText(f.size)}</span>
+    ${withDelete ? `<button type="button" data-rcptdel="${t.id}" data-fid="${esc(f.id)}" aria-label="Beleg ${esc(f.name)} entfernen" title="Entfernen">✕</button>` : ''}</span>`).join('')}</div>`;
+}
+
+/* ---------- Beleg beim Hochladen einer Buchung zuordnen ----------
+   Vorauswahl aus dem Dateinamen: Datum, Betrag und Wörter, die im Empfänger oder Memo vorkommen. */
+const RCPT_STOP = new Set(['rechnung', 'beleg', 'quittung', 'kontoauszug', 'auszug', 'scan', 'dokument', 'document', 'invoice', 'ihrer', 'ihre', 'ihren', 'jährliche', 'jaehrliche', 'informationen', 'information', 'zur', 'zum', 'und', 'der', 'die', 'das', 'vom', 'für', 'fuer']);
+function guessFromName(name) {
+  const base = name.replace(/\.[^.]+$/, '');
+  let date = '', m;
+  if ((m = base.match(/(20\d\d)[-_.]?(0[1-9]|1[0-2])[-_.]?(0[1-9]|[12]\d|3[01])(?!\d)/))) date = `${m[1]}-${m[2]}-${m[3]}`;
+  else if ((m = base.match(/(?<!\d)(0?[1-9]|[12]\d|3[01])\.(0?[1-9]|1[0-2])\.(20\d\d)/))) date = `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  let amount = null;
+  if ((m = base.match(/(?<![\d.,])(\d{1,3}(?:\.\d{3})+|\d+),(\d{2})(?!\d)/)) || (m = base.match(/(?<![\d.,])(\d+)\.(\d{2})\s?(?:€|eur)/i))) amount = Math.round(parseFloat(m[1].replace(/\./g, '') + '.' + m[2]) * 100);
+  const words = [...new Set(base.toLowerCase().replace(/\d+([.,]\d+)*/g, ' ').split(/[^a-zäöüß]+/).filter(w => w.length >= 4 && !RCPT_STOP.has(w)))];
+  return { date, amount, words };
+}
+function receiptCandidates(st) {
+  const g = st.guess, date = st.date, q = (st.q || '').trim().toLowerCase();
+  // Stichworte nach Seltenheit gewichten: „stuttgarter“ zählt mehr als „versicherung“, das in vielen Buchungen steht
+  const text = t => `${t.payee || ''} ${t.payeeOrig || ''} ${t.memo || ''}`.toLowerCase();
+  const N = Math.max(2, DB.tx.length), wt = {};
+  for (const w of g.words) { const df = DB.tx.reduce((n, t) => n + (text(t).includes(w) ? 1 : 0), 0); wt[w] = df ? 50 * Math.log(N / df) / Math.log(N) : 0; }
+  const score = t => {
+    let s = 0;
+    if (g.amount != null && Math.abs(t.amount) === g.amount) s += 100;
+    const hay = text(t);
+    s += g.words.filter(w => hay.includes(w)).reduce((x, w) => x + wt[w], 0);
+    if (date) s -= Math.min(60, Math.abs(daysBetween(t.date, date)));
+    return s;
+  };
+  const pick = win => DB.tx.filter(t => !t.gen && (!st.acct || t.acct === st.acct) && (!date || Math.abs(daysBetween(t.date, date)) <= win)
+    && (!q || `${displayPayee(t)} ${t.memo || ''} ${t.category || ''} ${(Math.abs(t.amount) / 100).toFixed(2).replace('.', ',')}`.toLowerCase().includes(q)));
+  let list = pick(14); if (!list.length && date) list = pick(60);
+  return list.map(t => ({ t, s: score(t) })).sort((a, b) => b.s - a.s || b.t.date.localeCompare(a.t.date)).slice(0, 15);
+}
+function startReceipts(files, origin) {
+  if (!files.length) return;
+  const q = UI.rcpt && UI.rcpt.files ? UI.rcpt.files : [];
+  UI.rcpt = { files: q.concat(files.map(f => ({ file: f, origin: origin || null }))), acct: '', q: '' };
+  nextReceipt(true);
+}
+function nextReceipt(first) {
+  const st = UI.rcpt; if (!first) st.files.shift();
+  if (!st.files.length) { UI.rcpt = null; if (location.hash === '#import') render(); return; }
+  st.guess = guessFromName(st.files[0].file.name); st.date = st.guess.date; st.q = '';
+  if (location.hash !== '#import') location.hash = 'import'; else render();
+  setTimeout(() => { const el = $('#rcpt'); if (el) el.scrollIntoView({ block: 'start' }); }, 50);
+}
+function receiptPanel() {
+  const st = UI.rcpt; if (!st || !st.files.length) return '';
+  const cur = st.files[0], f = cur.file, g = st.guess, cands = receiptCandidates(st);
+  const accts = Object.values(DB.accounts).sort((a, b) => (a.inactive - b.inactive) || a.name.localeCompare(b.name, 'de'));
+  const hint = [g.date ? 'Datum ' + dDE(g.date) : '', g.amount != null ? 'Betrag ' + money(g.amount) : '', g.words.length ? 'Stichworte ' + g.words.slice(0, 4).join(', ') : ''].filter(Boolean).join(' · ');
+  return `<div class="panel notice-panel" id="rcpt"><div class="row spread"><h2>Beleg zuordnen${st.files.length > 1 ? ` <span class="chip">${st.files.length} offen</span>` : ''}</h2>
+      <div class="row">${/\.pdf$/i.test(f.name) && !cur.origin ? '<button id="rcpt-asstmt" title="Doch als Kontoauszug unter einem Konto ablegen">Ist ein Kontoauszug</button>' : ''}<button id="rcpt-skip">Überspringen</button><button id="rcpt-cancel">Abbrechen</button></div></div>
+    <p><b>${esc(f.name)}</b> <span class="muted">${kbText(f.size)}${hint ? ' · aus dem Dateinamen: ' + esc(hint) : ''}</span></p>
+    <div class="form" style="padding-top:0">
+      <label class="field"><span>Konto</span><select id="rc-acct"><option value="">Alle Konten</option>${accts.map(a => `<option value="${esc(a.name)}" ${a.name === st.acct ? 'selected' : ''}>${esc(a.name)}${a.inactive ? ' (inaktiv)' : ''}</option>`).join('')}</select></label>
+      <label class="field"><span>Buchungsdatum (ungefähr)</span><input type="date" id="rc-date" value="${esc(st.date || '')}"></label>
+      <label class="field"><span>Suche</span><input type="search" id="rc-q" value="${esc(st.q || '')}" placeholder="Empfänger, Memo oder Betrag"></label>
+    </div>
+    ${cands.length ? `<div class="table-wrap"><table><thead><tr><th>Datum</th><th>Konto</th><th>Empfänger / Memo</th><th class="r">Betrag</th><th></th></tr></thead><tbody>
+      ${cands.map(({ t, s: sc }, i) => `<tr${i === 0 && sc >= 30 ? ' class="picked"' : ''}><td class="num">${dDE(t.date)}</td><td>${esc(t.acct)}</td>
+        <td>${esc(displayPayee(t)) || '<span class="muted">–</span>'}${t.memo && t.memo !== t.payee ? `<span class="sub clip" title="${esc(t.memo)}">${esc(t.memo)}</span>` : ''}${(t.files || []).length ? `<span class="sub">📎 schon ${t.files.length} ${t.files.length === 1 ? 'Beleg' : 'Belege'}</span>` : ''}</td>
+        <td class="r num ${moneyCls(t.amount)}">${money(t.amount)}</td>
+        <td class="r"><button class="${i === 0 ? 'primary' : ''}" data-rcptattach="${t.id}">Anhängen</button></td></tr>`).join('')}</tbody></table></div>`
+      : `<p class="muted">Keine Buchung ${st.date ? 'um den ' + dDE(st.date) : ''}${st.acct ? ' in „' + esc(st.acct) + '“' : ''} gefunden. Ändere Konto, Datum oder Suche.</p>`}
+    <p class="muted">Die Vorschläge sind nach Betrag, Stichworten aus dem Dateinamen und Nähe zum Datum sortiert. ${Server.ok ? 'Der Beleg liegt danach auf deinem Server unter „belege“.' : 'Der Beleg bleibt in diesem Browser gespeichert.'}</p>
+  </div>`;
+}
+/* Frage beim Hochladen von PDFs: Kontoauszug oder Beleg? */
+function uploadAskPanel() {
+  const f = UI.upAsk; if (!f || !f.length) return '';
+  return `<div class="panel notice-panel" id="upask"><h2>${f.length === 1 ? 'Ist das ein Kontoauszug?' : `Sind das Kontoauszüge? (${f.length} PDFs)`}</h2>
+    <p>${f.map(x => esc(x.name)).join(', ')}</p>
+    <div class="row"><button class="primary" id="upask-stmt">Ja, Kontoauszug</button><button class="primary" id="upask-rcpt">Nein, Beleg zu einer Buchung</button><button id="upask-cancel">Abbrechen</button></div>
+    <p class="muted">Kontoauszüge werden unter einem Konto abgelegt. Belege (z. B. Rechnungen) hängst du an eine Buchung.</p></div>`;
+}
+
 function periodFromName(n) {
   // bei Zeiträumen wie „2019-01-01_2026-11-15“ zählt das Ende
   let m = [...n.matchAll(/(20\d\d)[-_. ]?(0[1-9]|1[0-2])(?!\d)/g)].pop(); if (m) return `${m[1]}-${m[2]}`;
@@ -3272,8 +3461,9 @@ Views.buchungen = () => {
     const xr = t.transfer && t.transfer !== t.acct ? (t.amount < 0 ? ' xout' : ' xin') : '';
     const memo = t.payee && t.memo && t.memo !== t.payee ? `<span class="sub clip" title="${esc(t.memo)}">${esc(t.memo)}</span>` : '';
     const tags = (t.tags || []).length ? `<span class="tags">${t.tags.map(g => `<span class="chip tag">${esc(g)}</span>`).join('')}</span>` : '';
+    const clip = (t.files || []).length ? ` <button class="clip" data-edit="${t.id}" title="${t.files.map(f => esc(f.name)).join('\n')}" aria-label="${t.files.length} ${t.files.length === 1 ? 'Beleg' : 'Belege'}">📎${t.files.length > 1 ? t.files.length : ''}</button>` : '';
     const on = UI.sel.has(t.id);
-    return `<tr class="${t.date > TODAY ? 'future' : ''}${xr}${on ? ' picked' : ''}" data-row="${t.id}"><td class="sel"><input type="checkbox" data-txsel="${t.id}" ${on ? 'checked' : ''} aria-label="Buchung auswählen"></td><td class="num">${dDE(t.date)}</td><td>${esc(t.acct)}</td><td>${esc(displayPayee(t)) || '<span class="muted">–</span>'}${memo}${tags}</td><td>${catCell}</td><td class="r num ${moneyCls(t.amount)}">${money(t.amount)}</td>
+    return `<tr class="${t.date > TODAY ? 'future' : ''}${xr}${on ? ' picked' : ''}" data-row="${t.id}"><td class="sel"><input type="checkbox" data-txsel="${t.id}" ${on ? 'checked' : ''} aria-label="Buchung auswählen"></td><td class="num">${dDE(t.date)}</td><td>${esc(t.acct)}</td><td>${esc(displayPayee(t)) || '<span class="muted">–</span>'}${clip}${memo}${tags}</td><td>${catCell}</td><td class="r num ${moneyCls(t.amount)}">${money(t.amount)}</td>
       <td class="r"><button class="icon" data-edit="${t.id}" aria-label="Buchung bearbeiten" title="Bearbeiten">✎</button></td></tr>`;
   }).join('');
   return `
@@ -3911,14 +4101,14 @@ Views.import = () => {
       <div class="row"><button class="primary" id="imp-go" ${newCount ? '' : 'disabled'}>${newCount} Buchungen importieren</button><button id="imp-cancel">Abbrechen</button></div>
     </div>`;
   }
-  return `<h1>Import</h1>${dropPanel()}
+  return `<h1>Import</h1>${uploadAskPanel()}${receiptPanel()}${dropPanel()}
     <div class="panel">
       <label class="drop" id="drop" for="file">
-        <b>Datei hierher ziehen: QIF aus Quicken, CSV von der Bank oder PDF-Kontoauszüge</b>
+        <b>Datei hierher ziehen: QIF aus Quicken, CSV von der Bank, PDF-Kontoauszüge oder Belege</b>
         <span class="muted">oder klicken zum Auswählen. Quicken: Datei › Exportieren › QIF-Datei. Online-Banking: Umsätze › Export als CSV.</span>
-        <input id="file" type="file" accept=".qif,.csv,.txt,.pdf,.qdf,.qsd" multiple hidden>
+        <input id="file" type="file" accept=".qif,.csv,.txt,.pdf,.qdf,.qsd,.jpg,.jpeg,.png,.gif,.webp,.heic" multiple hidden>
       </label>
-      <p class="muted">Die Datei wird nur in diesem Browser gelesen und nicht verändert. Bereits importierte Buchungen werden erkannt und übersprungen. PDF-Auszüge werden unter dem Konto abgelegt, ihre Buchungen aber nicht ausgelesen.</p>
+      <p class="muted">Die Datei wird nur in diesem Browser gelesen und nicht verändert. Bereits importierte Buchungen werden erkannt und übersprungen. Bei PDFs fragt Kontor, ob es ein Kontoauszug ist (Ablage unter dem Konto) oder ein Beleg zu einer Buchung. Bilder sind immer Belege.</p>
     </div>
     ${UI.csv ? (UI.csv.tr ? trPanel() : UI.csv.hold ? holdPanel() : csvPanel()) : ''}
     ${preview}`;
@@ -4068,9 +4258,10 @@ function queueStatements(files) {
 function readFiles(list) {
   const files = Array.from(list || []);
   if (!files.length) return;
-  const pdfs = files.filter(f => /\.pdf$/i.test(f.name));
-  if (pdfs.length) queueStatements(pdfs);
-  const csvs = files.filter(f => /\.(csv|txt)$/i.test(f.name)), other = files.filter(f => !/\.(pdf|csv|txt)$/i.test(f.name));
+  const pdfs = files.filter(f => /\.pdf$/i.test(f.name)), imgs = files.filter(f => /\.(jpe?g|png|gif|webp|heic)$/i.test(f.name));
+  if (imgs.length) startReceipts(imgs);
+  if (pdfs.length) { UI.upAsk = (UI.upAsk || []).concat(pdfs); if (location.hash !== '#import') location.hash = 'import'; else render(); }
+  const csvs = files.filter(f => /\.(csv|txt)$/i.test(f.name)), other = files.filter(f => !/\.(pdf|csv|txt|jpe?g|png|gif|webp|heic)$/i.test(f.name));
   if (csvs.length) { UI.csvQueue = csvs.slice(1); readFile(csvs[0]); }
   else if (other.length) readFile(other[0]);
   if (other.length > (csvs.length ? 0 : 1)) toast('QIF-Dateien bitte einzeln importieren.');
@@ -4131,6 +4322,7 @@ function render() {
   $('#catlist').innerHTML = allCategories().map(c => `<option value="${esc(c)}">`).join('');
   $('#taglist').innerHTML = DB.tags.map(g => `<option value="${esc(g)}">`).join('');
   $('#main').innerHTML = fn();
+  enhanceDates($('#main'));
   const n = contractAlerts().length, b = $('#co-badge');
   b.hidden = !n; b.textContent = n; b.title = n ? `${n} Kündigungsfristen bald fällig` : '';
 }
@@ -4173,6 +4365,8 @@ document.addEventListener('change', e => {
     renameTag(from, to); save(); render(); toast(`Tag in „${to}“ umbenannt.`);
   }
   else if (t.id === 'f-acct') { UI.f.acct = t.value; UI.limit = 150; render(); }
+  else if (t.id === 'rc-acct' && UI.rcpt) { UI.rcpt.acct = t.value; render(); }
+  else if (t.id === 'rc-date' && UI.rcpt) { UI.rcpt.date = /^\d{4}-\d{2}-\d{2}$/.test(t.value) ? t.value : ''; render(); }
   else if (t.id === 'flow-period') { UI.flowP = t.value; render(); }
   else if (t.id === 'f-month') { UI.f.month = t.value; UI.limit = 150; render(); }
   else if (t.id === 'f-cat') { UI.f.cat = t.value; UI.limit = 150; render(); }
@@ -4250,7 +4444,11 @@ document.addEventListener('change', e => {
 let qTimer;
 document.addEventListener('input', e => {
   const t = e.target;
-  if (t.id === 'f-q' || t.id === 'cat-q') {
+  if (t.id === 'rc-q' && UI.rcpt) {
+    clearTimeout(qTimer);
+    qTimer = setTimeout(() => { UI.rcpt.q = t.value; render(); const q = $('#rc-q'); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }, 250);
+  }
+  else if (t.id === 'f-q' || t.id === 'cat-q') {
     clearTimeout(qTimer);
     qTimer = setTimeout(() => {
       if (t.id === 'f-q') { UI.f.q = t.value; UI.limit = 150; } else UI.catQ = t.value;
@@ -4265,6 +4463,11 @@ document.addEventListener('input', e => {
 
 function dialogChange(t) {
   if (!ED) return;
+  if (ED.mode === 'tx' && t.id === 'ed-file' && t.files.length) {
+    const files = Array.from(t.files), id = ED.id; readTx();
+    (async () => { let n = 0; for (const f of files) if (await attachReceipt(id, f)) n++; save(); if (ED && ED.mode === 'tx') showDialog(); render(); if (n) toast(`${n} ${n === 1 ? 'Datei' : 'Dateien'} angehängt.`); })();
+    return;
+  }
   if (ED.mode === 'prefs') { if (/^pf-/.test(t.name)) { Prefs.set(t.name.slice(3), t.value); showDialog(); } return; }
   if (ED.mode === 'acct') {
     if (t.id === 'ac-inst' && t.value === '__new') { readAcct(); openInst(null, { back: Object.assign({}, ED) }); }
@@ -4392,6 +4595,33 @@ document.addEventListener('click', e => {
   if (t.dataset.ed && ED) return editorClick(t);
   if (t.dataset.addtag) { const i = $('#ed-tags'); i.value = parseTags(i.value + ',' + t.dataset.addtag).join(', '); t.remove(); return; }
   if (t.id === 'quotes-refresh') return refreshQuotes();
+  if (t.classList.contains('cal')) return openCalendar(t);
+  if (t.dataset.rcptopen) return openReceipt(+t.dataset.rcptopen, t.dataset.fid);
+  if (t.dataset.rcptdel) {
+    const box = $('#rf-' + t.dataset.fid); if (box) box.innerHTML = `<span>Beleg entfernen?</span><button type="button" class="danger" data-rcptdelyes="${t.dataset.rcptdel}" data-fid="${esc(t.dataset.fid)}">Ja</button><button type="button" data-rcptdelno="1">Nein</button>`;
+    return;
+  }
+  if (t.dataset.rcptdelyes) { (async () => { await removeReceipt(+t.dataset.rcptdelyes, t.dataset.fid); save(); if (ED && ED.mode === 'tx') { readTx(); showDialog(); } render(); toast(Server.ok ? 'Beleg entfernt. Die Datei liegt im Papierkorb-Ordner des Servers.' : 'Beleg entfernt.'); })(); return; }
+  if (t.dataset.rcptdelno) { if (ED && ED.mode === 'tx') { readTx(); showDialog(); } return; }
+  if (t.id === 'upask-stmt') { const f = UI.upAsk || []; UI.upAsk = null; return queueStatements(f); }
+  if (t.id === 'upask-rcpt') { const f = UI.upAsk || []; UI.upAsk = null; return startReceipts(f); }
+  if (t.id === 'upask-cancel') { UI.upAsk = null; return render(); }
+  if (t.id === 'rcpt-skip') return nextReceipt();
+  if (t.id === 'rcpt-cancel') { UI.rcpt = null; return render(); }
+  if (t.id === 'rcpt-asstmt') { const f = UI.rcpt.files[0].file; nextReceipt(); return queueStatements([f]); }
+  if (t.dataset.rcptattach) {
+    const id = +t.dataset.rcptattach, cur = UI.rcpt && UI.rcpt.files[0]; if (!cur) return;
+    t.disabled = true;
+    (async () => {
+      const ok = await attachReceipt(id, cur.file); if (!ok) { t.disabled = false; return; }
+      save();
+      if (cur.origin && cur.origin.box === 'inbox') { try { await Drop.api('drop/trash', { box: 'inbox', name: cur.origin.name }); Drop.state = await Drop.api('drop'); updateBadges(); } catch (e) { } }
+      const tx = DB.tx.find(x => x.id === id);
+      toast(`„${cur.file.name}“ an die Buchung vom ${dDE(tx.date)} (${displayPayee(tx) || tx.acct}, ${money(tx.amount)}) angehängt.`, null, 7000);
+      nextReceipt();
+    })();
+    return;
+  }
   if (t.id === 'sel-clear') { UI.sel.clear(); return render(); }
   if (t.id === 'sel-tagadd') {
     const g = $('#sel-tag').value.trim();
@@ -4401,11 +4631,12 @@ document.addEventListener('click', e => {
   }
   if (t.id === 'prefs-open') { ED = { mode: 'prefs' }; return showDialog(); }
   if (t.id === 'drop-run') return Drop.run(true);
-  if (t.dataset.inimport || t.dataset.instore || t.dataset.inretry || t.dataset.intrash) {
-    const i = +(t.dataset.inimport || t.dataset.instore || t.dataset.inretry || t.dataset.intrash), r = Drop.state && Drop.state.inbox[i]; if (!r) return;
+  if (t.dataset.inimport || t.dataset.instore || t.dataset.inretry || t.dataset.intrash || t.dataset.inrcpt) {
+    const i = +(t.dataset.inimport || t.dataset.instore || t.dataset.inretry || t.dataset.intrash || t.dataset.inrcpt), r = Drop.state && Drop.state.inbox[i]; if (!r) return;
     const refresh = async msg => { Drop.state = await Drop.api('drop'); updateBadges(); render(); if (msg) toast(msg); };
     (async () => {
       try {
+        if (t.dataset.inrcpt) return startReceipts([new File([await Drop.bytes('inbox', r.name)], r.name, { type: 'application/pdf' })], { box: 'inbox', name: r.name });
         if (t.dataset.inimport) return readCSVFile(new File([await Drop.bytes('inbox', r.name)], r.name), await Drop.bytes('inbox', r.name), { box: 'inbox', name: r.name });
         if (t.dataset.instore) {
           const acct = $('#in-acct-' + i).value; if (!acct) return toast('Bitte zuerst das Konto wählen.');

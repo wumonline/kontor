@@ -99,6 +99,9 @@ In der Inbox kannst du Dateien von Hand importieren, einem Konto zuordnen, erneu
 (z. B. nachdem du beim Konto die IBAN eingetragen hast) oder verwerfen. Verarbeitete Dateien liegen danach in
 `appdata/kontor/kontoauszuege/<Konto>`, verworfene in `appdata/kontor/papierkorb`. Gelöscht wird nichts.
 
+Belege zu Buchungen (Rechnungen, Fotos) liegen in `appdata/kontor/belege/<Konto>/<Jahr>`. Ein PDF in der
+Inbox lässt sich mit **Als Beleg …** einer Buchung zuordnen.
+
 PDFs müssen echten Text enthalten. Eingescannte Auszüge ohne Texterkennung landen in der Inbox.
 
 ## Sicherheit

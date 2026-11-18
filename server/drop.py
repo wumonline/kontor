@@ -3,6 +3,7 @@
 DROP_DIR       Ordner, in den heruntergeladene Bankdateien gelegt werden (z. B. eine Unraid-Freigabe).
 DROP_DIR/Inbox Dateien, die die App nicht zuordnen konnte, mit Begründung in .gruende.json.
 ARCHIVE_DIR    abgelegte Kontoauszüge, ein Unterordner je Konto.
+RECEIPT_DIR    Belege zu Buchungen (Rechnungen usw.), je Konto und Jahr ein Unterordner.
 TRASH_DIR      verworfene oder gelöschte Dateien; nichts wird hart gelöscht.
 
 Die Zuordnung selbst macht die App (gleiche Logik wie beim Import von Hand). Der Server listet, liefert,
@@ -25,8 +26,9 @@ DATE_RE = re.compile(r'\b(\d{1,2})\.(\d{1,2})\.(20\d\d)\b')
 
 
 def setup(data_dir):
-    global ARCHIVE_DIR, TRASH_DIR
+    global ARCHIVE_DIR, TRASH_DIR, RECEIPT_DIR
     ARCHIVE_DIR = os.path.join(data_dir, 'kontoauszuege')
+    RECEIPT_DIR = os.path.join(data_dir, 'belege')
     TRASH_DIR = os.path.join(data_dir, 'papierkorb')
     try:
         os.makedirs(os.path.join(DROP_DIR, INBOX), exist_ok=True)
@@ -195,32 +197,40 @@ def trash(box, name):
 
 # ---------- Archiv ----------
 
-def _archive_path(rel):
-    full = os.path.abspath(os.path.join(ARCHIVE_DIR, str(rel or '')))
-    if not full.startswith(os.path.abspath(ARCHIVE_DIR) + os.sep) or not os.path.isfile(full):
+def _root(kind):
+    """Ablage: Kontoauszüge (Standard) oder Belege zu Buchungen (kind='beleg')."""
+    return RECEIPT_DIR if kind == 'beleg' else ARCHIVE_DIR
+
+
+def _archive_path(rel, kind=''):
+    base = os.path.abspath(_root(kind))
+    full = os.path.abspath(os.path.join(base, str(rel or '')))
+    if not full.startswith(base + os.sep) or not os.path.isfile(full):
         raise FileNotFoundError('Datei nicht im Archiv')
     return full
 
 
-def archive_upload(acct, name, data):
+def archive_upload(acct, name, data, kind='', year=''):
     name = _safe_name(os.path.basename(str(name or '').replace('\\', '/')))
     if len(data) > MAX_FILE:
         raise ValueError('Datei größer als 50 MB')
-    folder = os.path.join(ARCHIVE_DIR, _safe_folder(acct))
+    folder = os.path.join(_root(kind), _safe_folder(acct))
+    if kind == 'beleg' and re.fullmatch(r'(19|20)\d\d', str(year or '')):
+        folder = os.path.join(folder, str(year))
     os.makedirs(folder, exist_ok=True)
     dst = _unique(os.path.join(folder, name))
     with open(dst, 'wb') as f:
         f.write(data)
-    return {'path': os.path.relpath(dst, ARCHIVE_DIR).replace(os.sep, '/'), 'size': len(data)}
+    return {'path': os.path.relpath(dst, _root(kind)).replace(os.sep, '/'), 'size': len(data)}
 
 
-def archive_read(rel):
-    p = _archive_path(rel)
+def archive_read(rel, kind=''):
+    p = _archive_path(rel, kind)
     with open(p, 'rb') as f:
         return os.path.basename(p), f.read()
 
 
-def archive_delete(rel):
-    p = _archive_path(rel)
+def archive_delete(rel, kind=''):
+    p = _archive_path(rel, kind)
     os.makedirs(TRASH_DIR, exist_ok=True)
     shutil.move(p, _unique(os.path.join(TRASH_DIR, os.path.basename(p))))
