@@ -8,8 +8,11 @@ Verträge und Abos, Kredite, Depot mit aktuellen Kursen. Die Daten bleiben auf d
 - **Import:** Quicken (QIF), CSV vieler Banken mit Duplikaterkennung und Saldoabgleich, Trade Republic (Cash-Konto und Depot getrennt)
 - **Online-Abruf per FinTS/HBCI** mit TAN-Freigabe (pushTAN, photoTAN, chipTAN manuell). Die PIN wird nie gespeichert.
 - **Umbuchungen** zwischen eigenen Konten, automatisch verknüpft und abgeglichen
-- **Kategorien, Tags und Regeln** für die automatische Zuordnung
+- **Kategorien, Tags und Regeln** für die automatische Zuordnung; Tags für viele Buchungen auf einmal per Mehrfachauswahl
+- **Kontogruppen** nach Kontoart oder selbst angelegt, mit Summen und als Buchungsfilter
+- **Sparkonten** mit Zinssatz-Verlauf und Zinshochrechnung, **Rentenkonten** mit Auszahlungstermin
 - **Übersicht** mit Einnahmen/Ausgaben pro Monat und Ausgaben nach Kategorie
+- **Einstellungen** für Schriftgröße, Hell/Dunkel und Farbschema (pro Browser)
 - **Verträge und Abos** mit Kündigungsfristen, Erkennung aus wiederkehrenden Zahlungen
 - **Kredite** mit Tilgungsplan und Sondertilgung
 - **Depot** mit Positionen, Einstand, aktuellem Kurs (über onvista, es wird nur die ISIN übertragen) und Gewinn/Verlust

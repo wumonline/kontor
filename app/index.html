@@ -9,7 +9,7 @@
    Keine externen Schriften oder Skripte: eine Finanz-App soll keine Anfragen ins Internet schicken. */
 :root {
   --bg: #f3f5f6; --surface: #ffffff; --fg: #16232b; --muted: #5b6b74; --line: #d9e0e4;
-  --accent: #0f7a6c; --accent-soft: #e0f1ee; --minus: #b4413a; --warn: #b7791f; --warn-soft: #fbf1e0;
+  --accent: #0f7a6c; --pos: #0f7a6c; --accent-soft: #e0f1ee; --minus: #b4413a; --warn: #b7791f; --warn-soft: #fbf1e0;
   --tout: #a8560c; --tout-soft: #fcefdf; --tin: #1f62a8; --tin-soft: #e4eefa;
   --c1: #2a78d6; --c2: #eb6834; --c3: #1baf7a; --c4: #eda100; --c5: #e87ba4; --c6: #008300; --c7: #6250d6; --c-other: #b3bec4; --c-none-bg: #eef1f3;
   --font: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
@@ -19,45 +19,46 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #0e1518; --surface: #162126; --fg: #e3eaed; --muted: #93a3ab; --line: #26353c;
-    --accent: #3cc2ad; --accent-soft: #15302c; --minus: #e2766e; --warn: #e0a84a; --warn-soft: #33281a; --tout: #f0a35a; --tout-soft: #3a2914; --tin: #84b6ec; --tin-soft: #172a3e;
+    --accent: #3cc2ad; --pos: #3cc2ad; --accent-soft: #15302c; --minus: #e2766e; --warn: #e0a84a; --warn-soft: #33281a; --tout: #f0a35a; --tout-soft: #3a2914; --tin: #84b6ec; --tin-soft: #172a3e;
     --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c98500; --c5: #d55181; --c6: #0ca30c; --c7: #9085e9; --c-other: #4f5f67; --c-none-bg: #1d2a30;
     color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --bg: #0e1518; --surface: #162126; --fg: #e3eaed; --muted: #93a3ab; --line: #26353c;
-  --accent: #3cc2ad; --accent-soft: #15302c; --minus: #e2766e; --warn: #e0a84a; --warn-soft: #33281a; --tout: #f0a35a; --tout-soft: #3a2914; --tin: #84b6ec; --tin-soft: #172a3e;
+  --accent: #3cc2ad; --pos: #3cc2ad; --accent-soft: #15302c; --minus: #e2766e; --warn: #e0a84a; --warn-soft: #33281a; --tout: #f0a35a; --tout-soft: #3a2914; --tin: #84b6ec; --tin-soft: #172a3e;
     --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c98500; --c5: #d55181; --c6: #0ca30c; --c7: #9085e9; --c-other: #4f5f67; --c-none-bg: #1d2a30;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { margin: 0; }
-body { background: var(--bg); color: var(--fg); font: 14px/1.5 var(--font); }
+html { font-size: var(--fs, 14px); }
+body { background: var(--bg); color: var(--fg); font: 1rem/1.5 var(--font); }
 .app { display: grid; grid-template-columns: 210px minmax(0, 1fr); min-height: 100vh; }
 .nav { background: var(--surface); border-right: 1px solid var(--line); padding: 20px 12px; display: flex; flex-direction: column; gap: 18px; position: sticky; top: 0; height: 100vh; }
-.brand { font-weight: 700; font-size: 17px; padding: 0 8px; }
-.brand small { font-weight: 500; color: var(--muted); font-size: 12px; margin-left: 4px; }
+.brand { font-weight: 700; font-size: 1.214rem; padding: 0 8px; }
+.brand small { font-weight: 500; color: var(--muted); font-size: 0.857rem; margin-left: 4px; }
 .nav nav { display: flex; flex-direction: column; gap: 2px; }
 .nav a { color: var(--fg); text-decoration: none; padding: 7px 10px; border-radius: 6px; }
 .nav a:hover { background: var(--bg); }
 .nav a[aria-current="page"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-.nav .foot { margin-top: auto; color: var(--muted); font-size: 12px; padding: 0 8px; }
+.nav .foot { margin-top: auto; color: var(--muted); font-size: 0.857rem; padding: 0 8px; }
 main { padding: 28px max(16px, 3vw) 64px; display: flex; flex-direction: column; gap: 22px; min-width: 0; }
-h1 { font-size: 24px; margin: 0; }
-h2 { font-size: 16px; margin: 0; }
+h1 { font-size: 1.714rem; margin: 0; }
+h2 { font-size: 1.143rem; margin: 0; }
 p { margin: 0; }
 .muted { color: var(--muted); }
 .num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.pos { color: var(--accent); } .neg { color: var(--minus); }
+.pos { color: var(--pos); } .neg { color: var(--minus); }
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 .spread { justify-content: space-between; }
 .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 16px; }
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: 12px; }
 .kpi { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
-.kpi .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
-.kpi .value { font-size: 22px; font-weight: 600; margin-top: 2px; }
+.kpi .label { font-size: 0.857rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+.kpi .value { font-size: 1.571rem; font-weight: 600; margin-top: 2px; }
 button, .btn, select, input { font: inherit; color: inherit; }
 button, .btn { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 6px 12px; cursor: pointer; text-decoration: none; display: inline-block; }
 button:hover, .btn:hover { border-color: var(--muted); }
@@ -69,21 +70,21 @@ select, input[type="text"], input[type="search"] { background: var(--surface); b
 .table-wrap { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
-th { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; white-space: nowrap; }
+th { font-size: 0.857rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; font-weight: 600; white-space: nowrap; }
 td.r, th.r { text-align: right; }
 tr.future td { opacity: .6; }
-td .sub { color: var(--muted); font-size: 12px; display: block; }
+td .sub { color: var(--muted); font-size: 0.857rem; display: block; }
 td .sub.clip { max-width: 360px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 td input.cat { width: 100%; min-width: 170px; padding: 3px 6px; }
 td input.cat.empty { border-color: var(--warn); background: var(--warn-soft); }
-.chip { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.chip { display: inline-block; font-size: 0.857rem; padding: 1px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
 .chip.warn { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
 .chip.ok { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 .chip.tout, select.xfer.tout, .xhint.tout { background: var(--tout-soft); border-color: var(--tout); color: var(--tout); }
 .chip.tin, select.xfer.tin, .xhint.tin { background: var(--tin-soft); border-color: var(--tin); color: var(--tin); }
-select.xfer { font-size: 12px; font-weight: 600; border-radius: 999px; padding: 2px 8px; max-width: 230px; }
+select.xfer { font-size: 0.857rem; font-weight: 600; border-radius: 999px; padding: 2px 8px; max-width: 230px; }
 select.xfer.pick { border-style: dashed; }
-.xhint { font-size: 12px; padding: 1px 8px; border-radius: 999px; border-style: dashed; white-space: nowrap; }
+.xhint { font-size: 0.857rem; padding: 1px 8px; border-radius: 999px; border-style: dashed; white-space: nowrap; }
 button.icon.xbtn { color: var(--muted); }
 button.icon.xbtn.hot { color: var(--tout); border-color: var(--tout); }
 tr.xout > td:first-child { box-shadow: inset 3px 0 0 var(--tout); }
@@ -91,11 +92,11 @@ tr.xin > td:first-child { box-shadow: inset 3px 0 0 var(--tin); }
 .xlegend { display: inline-flex; gap: 8px; align-items: center; margin-left: 10px; }
 .bar { height: 8px; border-radius: 4px; background: var(--bg); overflow: hidden; }
 .bar > span { display: block; height: 100%; background: var(--minus); }
-.bar.in > span { background: var(--accent); }
-.chart text { fill: var(--muted); font-size: 11px; font-family: var(--font); }
+.bar.in > span { background: var(--pos); }
+.chart text { fill: var(--muted); font-size: 0.786rem; font-family: var(--font); }
 .chart .grid { stroke: var(--line); }
-.chart .in { fill: var(--accent); } .chart .out { fill: var(--minus); }
-.legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
+.chart .in { fill: var(--pos); } .chart .out { fill: var(--minus); }
+.legend { display: flex; gap: 14px; font-size: 0.857rem; color: var(--muted); }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 .drop { border: 2px dashed var(--line); border-radius: 10px; padding: 28px; text-align: center; display: flex; flex-direction: column; gap: 10px; align-items: center; }
 .drop.over { border-color: var(--accent); background: var(--accent-soft); }
@@ -113,9 +114,9 @@ details[open] summary .name::before { content: "▾ "; }
 .donut svg { width: 170px; height: 170px; flex: none; }
 .donut svg path { stroke: var(--surface); stroke-width: 2; stroke-linejoin: round; }
 .donut svg path:hover { opacity: .8; }
-.donut svg text { fill: var(--muted); font-size: 12px; }
-.donut svg text.big { fill: var(--fg); font-size: 19px; font-weight: 600; }
-.donut-legend { list-style: none; margin: 0; padding: 0; flex: 1 1 170px; min-width: 0; font-size: 13px; }
+.donut svg text { fill: var(--muted); font-size: 0.857rem; }
+.donut svg text.big { fill: var(--fg); font-size: 1.357rem; font-weight: 600; }
+.donut-legend { list-style: none; margin: 0; padding: 0; flex: 1 1 170px; min-width: 0; font-size: 0.929rem; }
 .donut-legend li { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto 40px; gap: 8px; align-items: center; padding: 2px 0; }
 .donut-legend i { width: 10px; height: 10px; border-radius: 2px; }
 .donut-legend li.none i { background-image: repeating-linear-gradient(45deg, var(--muted) 0 2px, transparent 2px 5px) !important; }
@@ -127,7 +128,7 @@ details[open] summary .name::before { content: "▾ "; }
 .fi-img { max-width: 260px; image-rendering: pixelated; background: #fff; padding: 6px; border-radius: 6px; }
 .kpis.mini { display: flex; gap: 22px; flex-wrap: wrap; }
 .kpis.mini > div { display: flex; flex-direction: column; align-items: flex-end; }
-.kpis.mini .label { font-size: 12px; color: var(--muted); }
+.kpis.mini .label { font-size: 0.857rem; color: var(--muted); }
 table.depot input.shares { width: 110px; text-align: right; }
 .warn-t { color: var(--warn); }
 .cat-row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -155,17 +156,17 @@ table.contracts tfoot td { border-bottom: none; border-top: 2px solid var(--line
 .seg button { border: none; border-radius: 0; padding: 5px 12px; }
 .seg button + button { border-left: 1px solid var(--line); }
 .seg button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-select.mini { font-size: 12px; padding: 2px 4px; margin-top: 4px; max-width: 190px; }
+select.mini { font-size: 0.857rem; padding: 2px 4px; margin-top: 4px; max-width: 190px; }
 .sub-panel { border-top: 1px solid var(--line); padding-top: 10px; }
 .sub-panel > summary { font-weight: 600; color: var(--accent); }
 .sub-panel > summary::before { content: "▸ "; }
 .sub-panel[open] > summary::before { content: "▾ "; }
 .form { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 12px 16px; padding-top: 12px; }
 .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.field > span { font-size: 12px; color: var(--muted); font-weight: 600; }
+.field > span { font-size: 0.857rem; color: var(--muted); font-weight: 600; }
 .field.wide { grid-column: 1 / -1; }
 .field.check { flex-direction: row; align-items: center; gap: 8px; }
-.field.check > span { font-weight: 400; font-size: 14px; color: var(--fg); }
+.field.check > span { font-weight: 400; font-size: 1rem; color: var(--fg); }
 .field input[type="text"], .field select, .field input[type="date"] { width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
 .field input[type="color"] { width: 60px; height: 32px; padding: 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 dialog { border: 1px solid var(--line); border-radius: 12px; padding: 0; background: var(--surface); color: var(--fg); width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 32px); box-shadow: 0 20px 60px rgba(0,0,0,.35); }
@@ -180,7 +181,7 @@ dialog::backdrop { background: rgba(10, 20, 25, .55); }
 .seg input:checked + span { background: var(--accent); color: var(--surface); font-weight: 600; }
 .seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: -2px; }
 .splits { display: flex; flex-direction: column; gap: 8px; }
-.splits h3 { margin: 0; font-size: 14px; }
+.splits h3 { margin: 0; font-size: 1rem; }
 .splits td input { width: 100%; }
 button.icon { padding: 2px 7px; line-height: 1.2; color: var(--muted); }
 button.icon:hover { color: var(--fg); }
@@ -189,7 +190,7 @@ button.linkish { background: none; border: 0; padding: 0; color: var(--accent); 
 .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 8px 12px; color: var(--muted); }
 .tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
 .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; }
-.chip.tag { background: var(--accent-soft); border-color: transparent; color: var(--accent); font-size: 11px; }
+.chip.tag { background: var(--accent-soft); border-color: transparent; color: var(--accent); font-size: 0.786rem; }
 .tag-pick { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .tag-pick .chip { cursor: pointer; }
 .row.nowrap { flex-wrap: nowrap; }
@@ -197,8 +198,8 @@ button.linkish { background: none; border: 0; padding: 0; color: var(--accent); 
 .progress > span { display: block; height: 100%; background: var(--accent); }
 dl.facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr)); gap: 10px 16px; margin: 0; }
 dl.facts div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-dl.facts dt { font-size: 12px; color: var(--muted); font-weight: 600; }
-dl.facts dd { margin: 0; font-size: 16px; font-weight: 600; }
+dl.facts dt { font-size: 0.857rem; color: var(--muted); font-weight: 600; }
+dl.facts dd { margin: 0; font-size: 1.143rem; font-weight: 600; }
 .chart .line-base, .chart .line-sim { fill: none; stroke-width: 2.5; stroke-linejoin: round; }
 .chart .line-base { stroke: var(--accent); }
 .chart .line-base.dim { stroke: var(--muted); stroke-dasharray: 5 4; stroke-width: 2; }
@@ -211,21 +212,37 @@ tr.past td { color: var(--muted); }
 .csvflow h3.step { margin: 0; }
 .csvflow h3.step.inline { display: inline; }
 .csvflow details.step-box > summary { list-style: none; }
-.csvflow dl.facts dd { font-size: 14px; overflow-wrap: anywhere; }
-table.csvprev { font-family: var(--mono); font-size: 12px; }
+.csvflow dl.facts dd { font-size: 1rem; overflow-wrap: anywhere; }
+table.csvprev { font-family: var(--mono); font-size: 0.857rem; }
 table.csvprev td, table.csvprev th { white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; padding: 4px 8px; }
 .chip.crit { background: var(--minus); border-color: var(--minus); color: var(--surface); }
 .notice.crit { border-color: var(--minus); }
 .warnp { border-color: var(--warn); background: var(--warn-soft); }
-.badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 4px; border-radius: 9px; background: var(--minus); color: var(--surface); font-size: 11px; font-weight: 700; }
-.rule-mark { font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 4px; cursor: help; }
-h3.step { margin: 4px 0 -6px; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); }
+.badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 4px; border-radius: 9px; background: var(--minus); color: var(--surface); font-size: 0.786rem; font-weight: 700; }
+.rule-mark { font-size: 0.714rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent); border-radius: 4px; padding: 0 4px; cursor: help; }
+h3.step { margin: 4px 0 -6px; font-size: 0.929rem; text-transform: uppercase; letter-spacing: .08em; color: var(--accent); }
 .preview { background: var(--bg); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
-.preview table { font-size: 13px; }
+.preview table { font-size: 0.929rem; }
 .notice-panel { border-color: var(--accent); background: var(--accent-soft); }
 button.icon.danger { color: var(--minus); border-color: var(--line); }
 button.icon.play { color: var(--accent); border-color: var(--accent); }
 button.icon.play:disabled { color: var(--muted); border-color: var(--line); }
+.nav .prefs-btn { text-align: left; background: none; border-color: transparent; color: var(--muted); padding: 7px 10px; }
+.nav .prefs-btn:hover { background: var(--bg); color: var(--fg); }
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.swatches label { cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 0.857rem; color: var(--muted); }
+.swatches input { position: absolute; opacity: 0; pointer-events: none; }
+.swatches i { width: 34px; height: 34px; border-radius: 50%; border: 3px solid var(--surface); box-shadow: 0 0 0 1px var(--line); }
+.swatches input:checked + i { box-shadow: 0 0 0 2px var(--fg); }
+.swatches input:focus-visible + i { outline: 2px solid var(--accent); outline-offset: 2px; }
+th.sel, td.sel { width: 34px; padding-right: 0; }
+td.sel input, th.sel input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+tr.picked td { background: var(--accent-soft); }
+.selbar { position: sticky; top: 0; z-index: 5; background: var(--accent-soft); border: 1px solid var(--accent); border-radius: 8px; padding: 8px 12px; }
+.selbar input[type="text"] { width: 180px; }
+tr.grp td { background: var(--bg); font-weight: 600; font-size: 0.857rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+tr.grp td.num { text-transform: none; letter-spacing: 0; color: var(--fg); }
+.rates td input { width: 100%; }
 @media (max-width: 760px) {
   .app { grid-template-columns: 1fr; }
   .nav { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 12px 16px; gap: 8px; }
@@ -240,7 +257,7 @@ button.icon.play:disabled { color: var(--muted); border-color: var(--line); }
 <body>
 <div class="app">
   <aside class="nav">
-    <div class="brand">Kontor<small>v0.1</small></div>
+    <div class="brand">Kontor<small id="brand-ver"></small></div>
     <nav id="nav">
       <a href="#uebersicht">Übersicht</a>
       <a href="#buchungen">Buchungen</a>
@@ -252,11 +269,13 @@ button.icon.play:disabled { color: var(--muted); border-color: var(--line); }
       <a href="#import">Import <span class="badge" id="in-badge" hidden></span></a>
       <a href="#konten">Konten &amp; Daten</a>
     </nav>
+    <button type="button" class="prefs-btn" id="prefs-open">⚙ Einstellungen</button>
     <div class="foot">Prototyp. Daten bleiben in diesem Browser.</div>
   </aside>
   <main id="main"></main>
 </div>
 <datalist id="catlist"></datalist>
+<datalist id="taglist"></datalist>
 <datalist id="payeelist"></datalist>
 <dialog id="dlg" aria-label="Bearbeiten"></dialog>
 <div id="toast" class="toast" role="status" hidden></div>
@@ -273,8 +292,52 @@ const moneyCls = c => c < 0 ? 'neg' : c > 0 ? 'pos' : '';
 const dDE = d => d ? d.slice(8, 10) + '.' + d.slice(5, 7) + '.' + d.slice(0, 4) : '';
 const TODAY = new Date().toISOString().slice(0, 10);
 const MONTHS = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
-const ACCT_TYPES = { 'Bank': 'Girokonto', 'CCard': 'Kreditkarte', 'Cash': 'Bargeld', 'Oth A': 'Vermögen', 'Oth L': 'Verbindlichkeit', 'Oth T': 'Tagesgeld', 'Oth D': 'Sonstiges', 'Port': 'Depot', 'Invst': 'Depot' };
+const ACCT_TYPES = { 'Bank': 'Girokonto', 'CCard': 'Kreditkarte', 'Cash': 'Bargeld', 'Oth T': 'Tagesgeld', 'Save': 'Sparkonto', 'Pens': 'Rentenkonto', 'Oth A': 'Vermögen', 'Oth L': 'Verbindlichkeit', 'Oth D': 'Sonstiges', 'Port': 'Depot', 'Invst': 'Depot' };
+/* Gruppen nach Kontoart, in dieser Reihenfolge angezeigt */
+const TYPE_GROUPS = { 'Bank': 'Girokonten', 'Oth T': 'Tagesgeld', 'Save': 'Sparkonten', 'CCard': 'Kreditkarten', 'Cash': 'Bargeld', 'Port': 'Depots', 'Pens': 'Rentenkonten', 'Oth A': 'Vermögen', 'Oth L': 'Verbindlichkeiten', 'Oth D': 'Sonstiges' };
+const typeGroup = t => t === 'Invst' ? 'Port' : TYPE_GROUPS[t] ? t : 'Oth D';
 const acctType = t => ACCT_TYPES[t] || t || '–';
+
+/* ---------- Darstellung ----------
+   Schriftgröße, Hell/Dunkel und Farbschema gelten pro Gerät und liegen im Browser, nicht in den Daten:
+   Handy und PC dürfen verschieden aussehen. Das Farbschema ändert die Akzentfarbe; Einnahmen bleiben grün. */
+const PALETTES = {
+  petrol: { name: 'Petrol', l: ['#0f7a6c', '#e0f1ee'], d: ['#3cc2ad', '#15302c'] },
+  blau: { name: 'Blau', l: ['#1f62a8', '#e4eefa'], d: ['#6aa6ec', '#172a3e'] },
+  violett: { name: 'Violett', l: ['#6250d6', '#ecebfb'], d: ['#9d93ee', '#25213f'] },
+  gruen: { name: 'Grün', l: ['#2f7d32', '#e5f2e5'], d: ['#6cc070', '#1b2e1c'] },
+  grafit: { name: 'Grafit', l: ['#3d4b53', '#e6eaec'], d: ['#b5c2c9', '#253136'] }
+};
+const FONT_SIZES = { s: ['Klein', 13], m: ['Normal', 14], l: ['Groß', 16], xl: ['Sehr groß', 18] };
+const THEMES = { system: 'Wie das System', light: 'Hell', dark: 'Dunkel' };
+const Prefs = {
+  KEY: 'kontor-darstellung',
+  v: { font: 'm', theme: 'system', palette: 'petrol' },
+  load() { try { Object.assign(this.v, JSON.parse(localStorage.getItem(this.KEY)) || {}); } catch (e) { } this.apply(); },
+  set(k, val) { this.v[k] = val; try { localStorage.setItem(this.KEY, JSON.stringify(this.v)); } catch (e) { } this.apply(); },
+  dark() { return this.v.theme === 'dark' || (this.v.theme === 'system' && matchMedia('(prefers-color-scheme: dark)').matches); },
+  apply() {
+    const r = document.documentElement, f = FONT_SIZES[this.v.font] || FONT_SIZES.m, p = PALETTES[this.v.palette];
+    r.style.setProperty('--fs', f[1] + 'px');
+    if (THEMES[this.v.theme] && this.v.theme !== 'system') r.setAttribute('data-theme', this.v.theme); else r.removeAttribute('data-theme');
+    if (p && this.v.palette !== 'petrol') { const [a, s] = this.dark() ? p.d : p.l; r.style.setProperty('--accent', a); r.style.setProperty('--accent-soft', s); }
+    else { r.style.removeProperty('--accent'); r.style.removeProperty('--accent-soft'); }
+  }
+};
+Prefs.load();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => Prefs.apply());
+function prefsForm() {
+  const v = Prefs.v, radio = (name, val, label, cur) => `<label><input type="radio" name="${name}" value="${val}" ${val === cur ? 'checked' : ''}><span>${label}</span></label>`;
+  return `<form id="ed-form" class="ed" novalidate>
+    <div class="row spread"><h2>Einstellungen</h2><button type="button" class="icon" data-ed="close" aria-label="Schließen">✕</button></div>
+    <div class="field"><span>Schriftgröße</span><div class="seg" role="radiogroup" aria-label="Schriftgröße">${Object.entries(FONT_SIZES).map(([k, [l]]) => radio('pf-font', k, l, v.font)).join('')}</div></div>
+    <div class="field"><span>Hell oder dunkel</span><div class="seg" role="radiogroup" aria-label="Hell oder dunkel">${Object.entries(THEMES).map(([k, l]) => radio('pf-theme', k, l, v.theme)).join('')}</div></div>
+    <div class="field"><span>Farbschema</span><div class="swatches" role="radiogroup" aria-label="Farbschema">${Object.entries(PALETTES).map(([k, p]) =>
+      `<label><input type="radio" name="pf-palette" value="${k}" ${k === v.palette ? 'checked' : ''}><i style="background:${Prefs.dark() ? p.d[0] : p.l[0]}"></i>${p.name}</label>`).join('')}</div></div>
+    <p class="muted">Die Einstellungen gelten nur für diesen Browser. Auf dem Handy kannst du andere wählen.</p>
+    <div class="row spread ed-foot"><span class="muted">${Server.info && Server.info.version ? 'Kontor ' + esc(Server.info.version) : ''}</span><button type="button" class="primary" data-ed="close">Fertig</button></div>
+  </form>`;
+}
 
 /* ---------- Speicher ----------
    Im Prototyp lokal im Browser. Für Unraid wird dieses Objekt durch Aufrufe an die Server-API ersetzt. */
@@ -289,6 +352,7 @@ const Server = {
     try {
       const h = await fetch('api/health', { cache: 'no-store' }); if (!h.ok) return;
       const j = await h.json(); if (!j || !j.ok || !('fints' in j)) return; this.info = j;
+      if (j.version) $('#brand-ver').textContent = 'v' + j.version;
     } catch (e) { return; }
     let j;
     try { const r = await fetch('api/data', { cache: 'no-store' }); if (!r.ok) throw new Error('HTTP ' + r.status); j = await r.json(); }
@@ -426,6 +490,7 @@ function ensureModel(d) {
   d.loans = d.loans || [];
   d.statements = d.statements || [];
   d.csvMaps = d.csvMaps || {};
+  d.groups = d.groups || [];
   for (const c of d.classes || []) if (c && !d.tags.includes(c)) d.tags.push(c);
   for (const t of d.tx) {
     if (!t.tags) {
@@ -723,6 +788,86 @@ function balance(name, upto = TODAY) {
   for (const t of DB.tx) if (t.acct === name && t.date <= upto) s += t.amount;
   return s;
 }
+
+/* ---------- Kontogruppen ----------
+   Automatisch nach Kontoart, dazu eigene Gruppen (DB.groups). Ein Konto darf in mehreren eigenen Gruppen stehen.
+   Im Kontofilter der Buchungen steht eine Gruppe als „g:type:<Art>“ oder „g:grp:<id>“. */
+function acctSet(sel) {
+  if (!sel) return null;
+  if (sel.startsWith('g:type:')) { const k = sel.slice(7); return new Set(Object.values(DB.accounts).filter(a => typeGroup(a.type) === k).map(a => a.name)); }
+  if (sel.startsWith('g:grp:')) { const g = DB.groups.find(x => x.id === sel.slice(6)); return new Set(g ? g.accts : []); }
+  return new Set([sel]);
+}
+const isGroupSel = sel => /^g:/.test(sel || '');
+/* Konten in Gruppen aufteilen: mode 'type' oder 'own'; liefert [{ name, sel, accts }] */
+function groupAccounts(list, mode) {
+  if (mode === 'own') {
+    const out = DB.groups.map(g => ({ name: g.name, sel: 'g:grp:' + g.id, accts: list.filter(a => g.accts.includes(a.name)) })).filter(g => g.accts.length);
+    const rest = list.filter(a => !DB.groups.some(g => g.accts.includes(a.name)));
+    if (rest.length) out.push({ name: 'Ohne Gruppe', sel: '', accts: rest });
+    return out;
+  }
+  return Object.entries(TYPE_GROUPS).map(([k, name]) => ({ name, sel: 'g:type:' + k, accts: list.filter(a => typeGroup(a.type) === k) })).filter(g => g.accts.length);
+}
+/* Optionen für einen Kontofilter: Gruppen (Art und eigene), danach die einzelnen Konten */
+function acctFilterOptions(cur, withInactive = true) {
+  const all = Object.values(DB.accounts).filter(a => withInactive || !a.inactive);
+  const opt = (v, l) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`;
+  const types = groupAccounts(all, 'type').map(g => opt(g.sel, `${g.name} (${g.accts.length})`)).join('');
+  const own = DB.groups.map(g => opt('g:grp:' + g.id, `${g.name} (${g.accts.filter(n => DB.accounts[n]).length})`)).join('');
+  const accts = all.sort((a, b) => (a.inactive - b.inactive) || a.name.localeCompare(b.name, 'de')).map(a => opt(a.name, a.name + (a.inactive ? ' (inaktiv)' : ''))).join('');
+  return `<optgroup label="Nach Kontoart">${types}</optgroup>${own ? `<optgroup label="Eigene Gruppen">${own}</optgroup>` : ''}<optgroup label="Konten">${accts}</optgroup>`;
+}
+
+/* ---------- Zinsen (Tagesgeld, Sparkonto) und Rentenkonten ---------- */
+const hasRates = a => !!a && (a.type === 'Save' || a.type === 'Oth T');
+const pctDE = r => (+r).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) + ' %';
+/* Zinssatz am Tag d aus dem Verlauf [{ from, rate }] */
+function rateAt(a, d = TODAY) {
+  let r = null;
+  for (const x of (a.rates || []).slice().sort((p, q) => p.from.localeCompare(q.from))) if (x.from <= d) r = x.rate;
+  return r;
+}
+/* Zinsen eines Jahres, tagesgenau: Tagesendsaldo × gültiger Satz / Tage des Jahres.
+   Bis heute mit den echten Buchungen, danach mit dem bekannten Saldo und den eingetragenen Sätzen (Hochrechnung). */
+function interestYear(a, year) {
+  if (!(a.rates || []).length) return null;
+  const leap = (y => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0)(+year), days = leap ? 366 : 365;
+  const list = DB.tx.filter(t => t.acct === a.name && t.date.startsWith(year)).sort((p, q) => p.date.localeCompare(q.date));
+  let bal = balance(a.name, `${+year - 1}-12-31`), i = 0, sofar = 0, total = 0;
+  const d = new Date(Date.UTC(+year, 0, 1));
+  for (let k = 0; k < days; k++, d.setUTCDate(d.getUTCDate() + 1)) {
+    const ds = d.toISOString().slice(0, 10);
+    while (i < list.length && list[i].date <= ds) bal += list[i++].amount;
+    const r = rateAt(a, ds); if (!r || bal <= 0) continue;
+    const z = bal * r / 100 / days; total += z; if (ds <= TODAY) sofar += z;
+  }
+  return { sofar: Math.round(sofar), total: Math.round(total) };
+}
+const PAYOUT = { once: 'Einmalzahlung', monthly: 'Monatliche Rente' };
+function untilText(d) {
+  const a = new Date(TODAY), b = new Date(d); let m = (b.getFullYear() - a.getFullYear()) * 12 + b.getMonth() - a.getMonth();
+  if (b.getDate() < a.getDate()) m--;
+  if (m < 1) { const n = Math.round((b - a) / 864e5); return n <= 0 ? 'heute' : `in ${n} ${n === 1 ? 'Tag' : 'Tagen'}`; }
+  const y = Math.floor(m / 12), r = m % 12;
+  return 'in ' + [y ? `${y} ${y === 1 ? 'Jahr' : 'Jahren'}` : '', r ? `${r} ${r === 1 ? 'Monat' : 'Monaten'}` : ''].filter(Boolean).join(' und ');
+}
+/* Kurzinfo unter dem Kontonamen: Art plus Zinssatz bzw. Auszahlungstermin */
+function acctInfo(a) {
+  const parts = [acctType(a.type)];
+  if (hasRates(a)) {
+    const r = rateAt(a);
+    if (r == null) parts.push((a.rates || []).length ? 'Zinssatz ab ' + dDE(a.rates.map(x => x.from).sort()[0]) : 'kein Zinssatz eingetragen');
+    else { const z = interestYear(a, TODAY.slice(0, 4)); parts.push(pctDE(r) + ' Zins' + (z ? ` · ≈ ${money(z.total)} Zinsen ${TODAY.slice(0, 4)}` : '')); }
+  }
+  if (a.type === 'Pens') {
+    const p = a.pension || {};
+    if (!p.date) parts.push('Auszahlungstermin fehlt');
+    else parts.push(`${p.date <= TODAY ? 'Auszahlung seit' : 'Auszahlung am'} ${dDE(p.date)}${p.date > TODAY ? ` (${untilText(p.date)})` : ''}`
+      + (p.amount ? ` · ${p.kind === 'monthly' ? money(p.amount) + ' im Monat' : 'erwartet ' + money(p.amount)}` : ''));
+  }
+  return parts.join(' · ');
+}
 const years = () => [...new Set(DB.tx.map(t => t.date.slice(0, 4)))].sort().reverse();
 function allCategories() {
   const set = new Set(Object.keys(DB.categories));
@@ -731,7 +876,7 @@ function allCategories() {
 }
 
 /* ---------- Zustand der Oberfläche ---------- */
-const UI = { coPer: (() => { try { return localStorage.getItem('fm-coper') || 'month'; } catch (err) { return 'month'; } })(), year: null, f: { acct: '', month: '', cat: '', tag: '', q: '' }, limit: 150, pending: null, open: {}, catTab: 'report', catQ: '', sim: {},
+const UI = { ovGroup: (() => { try { return localStorage.getItem('kontor-ovgroup') || 'type'; } catch (err) { return 'type'; } })(), sel: new Set(), lastSel: null, coPer: (() => { try { return localStorage.getItem('fm-coper') || 'month'; } catch (err) { return 'month'; } })(), year: null, f: { acct: '', month: '', cat: '', tag: '', q: '' }, limit: 150, pending: null, open: {}, catTab: 'report', catQ: '', sim: {},
   exp: { kind: 'tx', year: '', acct: '', format: 'de', splits: false, inactive: true } };
 const NOFILTER = () => ({ acct: '', month: '', cat: '', tag: '', q: '' });
 const amtDE = c => (Math.abs(c) / 100).toFixed(2).replace('.', ',');
@@ -751,14 +896,15 @@ function openTx(id, preset) {
       splitOn: !!(t.splits && t.splits.length), splits: (t.splits || []).map(s => ({ category: s.transfer ? '[' + s.transfer + ']' : s.category, memo: s.memo, amount: Math.abs(s.amount) })) };
   } else {
     const accts = Object.values(DB.accounts).filter(a => !a.inactive);
-    ED = { mode: 'tx', id: null, acct: (preset && preset.acct) || UI.f.acct || (accts[0] && accts[0].name) || '', date: TODAY, kind: 'out', amount: 0,
+    ED = { mode: 'tx', id: null, acct: (preset && preset.acct) || (isGroupSel(UI.f.acct) ? '' : UI.f.acct) || (accts[0] && accts[0].name) || '', date: TODAY, kind: 'out', amount: 0,
       payee: '', memo: '', category: '', other: '', tags: [], splitOn: false, splits: [], fresh: true };
   }
   showDialog();
 }
 function openAcct(name) {
   const a = name ? DB.accounts[name] : null;
-  ED = { mode: 'acct', orig: name || null, name: a ? a.name : '', type: a ? a.type : 'Bank', institute: a ? a.institute : '', opening: a ? a.opening : 0 };
+  ED = { mode: 'acct', orig: name || null, name: a ? a.name : '', type: a ? a.type : 'Bank', institute: a ? a.institute : '', opening: a ? a.opening : 0,
+    rates: (a && a.rates || []).map(r => ({ from: r.from, rate: r.rate })), pension: Object.assign({ date: '', kind: 'once', amount: 0 }, a && a.pension) };
   showDialog();
 }
 function showDialog() {
@@ -771,7 +917,7 @@ function showDialog() {
     const p = [...new Set(DB.tx.map(t => t.payee).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
     $('#payeelist').innerHTML = p.map(x => `<option value="${esc(x)}">`).join('');
   }
-  d.innerHTML = ED.mode === 'tx' ? txForm() : ED.mode === 'rule' ? ruleForm() : ED.mode === 'contract' ? contractForm() : ED.mode === 'loan' ? loanForm() : ED.mode === 'inst' ? instForm() : ED.mode === 'fints' ? fintsForm() : acctForm();
+  d.innerHTML = ED.mode === 'tx' ? txForm() : ED.mode === 'rule' ? ruleForm() : ED.mode === 'contract' ? contractForm() : ED.mode === 'loan' ? loanForm() : ED.mode === 'inst' ? instForm() : ED.mode === 'fints' ? fintsForm() : ED.mode === 'prefs' ? prefsForm() : ED.mode === 'group' ? groupForm() : acctForm();
   if (!d.open) d.showModal();
   const first = d.querySelector('[autofocus]'); if (first) first.focus();
   updateRest(); updateRulePreview(); updateContractPreview(); updateLoanPreview();
@@ -924,6 +1070,7 @@ function acctForm() {
       <label class="field"><span>Institut</span><select id="ac-inst"><option value="">Ohne Institut</option>${Object.values(DB.institutes).sort((x, y) => x.name.localeCompare(y.name, 'de')).map(i => `<option value="${esc(i.id)}" ${i.id === e.institute ? 'selected' : ''}>${esc(i.name)}</option>`).join('')}<option value="__new">+ Neues Institut …</option></select></label>
       ${a ? '' : `<label class="field"><span>Anfangssaldo in €</span><input type="text" id="ac-open" inputmode="decimal" placeholder="0,00" value="${esc(e.openRaw || '')}"></label>`}
     </div>
+    ${acctExtras(e)}
     ${a ? `<p class="muted">${n} Buchungen. Beim Umbenennen werden alle Buchungen und Umbuchungen mit angepasst.</p>` : ''}
     ${a ? (loanOfAcct(a.name)
       ? `<div class="preview"><p>Dieses Konto wird als Kredit „${esc(loanOfAcct(a.name).name)}“ unter Kredite &amp; Schulden geführt.</p><div class="row"><button type="button" data-ed="unloan">Wieder als normales Konto führen</button></div></div>`
@@ -934,19 +1081,116 @@ function acctForm() {
     </div>
   </form>`;
 }
+/* Zusatzfelder je nach Kontoart: Zinsverlauf (Tagesgeld, Sparkonto) oder Auszahlung (Rentenkonto) */
+function acctExtras(e) {
+  if (e.type === 'Save' || e.type === 'Oth T') {
+    const cur = rateAt({ rates: e.rates.filter(r => r.from && r.rate !== '' && !isNaN(r.rate)) });
+    return `<div class="splits"><div class="row spread"><h3>Zinssatz</h3><span class="muted">${cur == null ? '' : 'heute ' + pctDE(cur)}</span></div>
+      <p class="muted">Trage den Satz mit dem Tag ein, ab dem er gilt. Ändert die Bank den Zins, füge eine neue Zeile hinzu; der alte Satz bleibt für die Zeit davor erhalten.</p>
+      ${e.rates.length ? `<div class="table-wrap"><table class="rates"><thead><tr><th>Gültig ab</th><th>Zinssatz in % pro Jahr</th><th></th></tr></thead><tbody>
+      ${e.rates.map((r, i) => `<tr><td><input type="date" id="rt-from-${i}" value="${esc(r.from)}" aria-label="Gültig ab, Zeile ${i + 1}"></td>
+        <td><input type="text" id="rt-rate-${i}" inputmode="decimal" value="${r.rate === '' || r.rate == null ? '' : String(r.rate).replace('.', ',')}" placeholder="z. B. 2,25" aria-label="Zinssatz, Zeile ${i + 1}"></td>
+        <td><button type="button" class="icon" data-ed="rmrate" data-i="${i}" aria-label="Zeile entfernen">✕</button></td></tr>`).join('')}</tbody></table></div>` : ''}
+      <div><button type="button" data-ed="addrate">+ Zinssatz hinzufügen</button></div></div>`;
+  }
+  if (e.type === 'Pens') {
+    const p = e.pension;
+    return `<div class="splits"><h3>Auszahlung</h3>
+      <div class="form" style="padding-top:0">
+        <label class="field"><span>Auszahlungstermin</span><input type="date" id="pe-date" value="${esc(p.date)}"></label>
+        <label class="field"><span>Art der Auszahlung</span><select id="pe-kind">${Object.entries(PAYOUT).map(([k, l]) => `<option value="${k}" ${k === p.kind ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+        <label class="field"><span>${p.kind === 'monthly' ? 'Rente im Monat in €' : 'Erwarteter Betrag in €'}</span><input type="text" id="pe-amount" inputmode="decimal" value="${p.amount ? amtDE(p.amount) : ''}" placeholder="optional"></label>
+      </div>
+      <p class="muted">${p.date ? (p.date > TODAY ? `Auszahlung ${untilText(p.date)}.` : 'Der Termin ist erreicht.') : 'Der Termin erscheint in der Übersicht und unter Konten & Daten.'}</p></div>`;
+  }
+  return '';
+}
+/* Formularwerte des Kontodialogs in ED übernehmen (vor dem Neuzeichnen und beim Speichern) */
+function readAcct() {
+  const e = ED, v = id => { const el = $('#' + id); return el ? el.value : undefined; };
+  if (v('ac-name') !== undefined) e.name = v('ac-name');
+  if (v('ac-type') !== undefined) e.type = v('ac-type');
+  if (v('ac-inst') !== undefined && v('ac-inst') !== '__new') e.institute = v('ac-inst');
+  if (v('ac-open') !== undefined) e.openRaw = v('ac-open');
+  e.rates = e.rates.map((r, i) => {
+    const f = v('rt-from-' + i), x = v('rt-rate-' + i); if (f === undefined) return r;
+    let t = x.replace('%', '').trim(); if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.');
+    return { from: f, rate: t === '' ? '' : +t };
+  });
+  if (v('pe-date') !== undefined) {
+    e.pension.date = v('pe-date'); e.pension.kind = v('pe-kind');
+    try { e.pension.amount = Math.abs(QIF.amount(v('pe-amount') || '0')); } catch (err) { e.pension.amount = NaN; }
+  }
+}
 function saveAcct() {
-  const e = ED, name = $('#ac-name').value.trim(), type = $('#ac-type').value, inst = $('#ac-inst').value === '__new' ? '' : $('#ac-inst').value;
+  readAcct();
+  const e = ED, name = e.name.trim(), type = e.type, inst = e.institute || '';
   if (!name) return toast('Bitte einen Namen eingeben.');
+  let rates = null, pension = null;
+  if (type === 'Save' || type === 'Oth T') {
+    const rs = e.rates.filter(r => r.from || r.rate !== '');
+    if (rs.some(r => !/^\d{4}-\d{2}-\d{2}$/.test(r.from) || r.rate === '' || isNaN(r.rate) || r.rate < -5 || r.rate > 30)) return toast('Jeder Zinssatz braucht ein Datum und einen Satz in Prozent, z. B. 2,25.');
+    if (new Set(rs.map(r => r.from)).size < rs.length) return toast('Zwei Zinssätze haben dasselbe Datum.');
+    rates = rs.sort((p, q) => p.from.localeCompare(q.from));
+  }
+  if (type === 'Pens') {
+    if (isNaN(e.pension.amount)) return toast('Betrag der Auszahlung nicht lesbar.');
+    pension = { date: e.pension.date || '', kind: e.pension.kind, amount: e.pension.amount || 0 };
+  }
   if (name !== e.orig && DB.accounts[name]) return toast('Ein Konto mit diesem Namen gibt es schon.');
   if (!e.orig) {
-    let opening = 0; try { opening = QIF.amount($('#ac-open').value || '0'); } catch (err) { return toast('Anfangssaldo nicht lesbar.'); }
+    let opening = 0; try { opening = QIF.amount(e.openRaw || '0'); } catch (err) { return toast('Anfangssaldo nicht lesbar.'); }
     DB.accounts[name] = { name, type, institute: inst, opening, desc: '', iban: '', number: '', inactive: false };
   } else {
-    const a = DB.accounts[e.orig];
     if (name !== e.orig) renameAccount(e.orig, name);
     Object.assign(DB.accounts[name], { type, institute: inst });
   }
+  if (rates) DB.accounts[name].rates = rates;
+  if (pension) DB.accounts[name].pension = pension;
   save(); closeDialog(); render(); toast(e.orig ? 'Konto gespeichert.' : `Konto „${name}“ angelegt.`);
+}
+/* Eigene Kontogruppe anlegen oder bearbeiten */
+function openGroup(id) {
+  const g = id ? DB.groups.find(x => x.id === id) : null;
+  ED = { mode: 'group', id: g ? g.id : null, name: g ? g.name : '', accts: new Set(g ? g.accts : []) };
+  showDialog();
+}
+function groupForm() {
+  const e = ED, list = Object.values(DB.accounts).sort((a, b) => (a.inactive - b.inactive) || a.name.localeCompare(b.name, 'de'));
+  return `<form id="ed-form" class="ed" novalidate>
+    <div class="row spread"><h2>${e.id ? 'Gruppe bearbeiten' : 'Neue Kontogruppe'}</h2><button type="button" class="icon" data-ed="close" aria-label="Schließen">✕</button></div>
+    <div class="form"><label class="field wide"><span>Name</span><input type="text" id="gr-name" value="${esc(e.name)}" placeholder="z. B. Gemeinsame Konten" autofocus></label></div>
+    <div class="field wide"><span>Konten in dieser Gruppe</span>
+      <div class="table-wrap"><table><tbody>${list.map(a => `<tr><td style="width:32px"><input type="checkbox" id="gr-acct-${slug(a.name)}" data-gracct="${esc(a.name)}" ${e.accts.has(a.name) ? 'checked' : ''}></td>
+        <td><label for="gr-acct-${slug(a.name)}"><b>${esc(a.name)}</b>${a.inactive ? ' <span class="muted">(inaktiv)</span>' : ''}<span class="sub">${esc(acctType(a.type))}</span></label></td>
+        <td class="r num ${moneyCls(balance(a.name))}">${money(balance(a.name))}</td></tr>`).join('')}</tbody></table></div></div>
+    <div class="row spread ed-foot">
+      <div class="row" id="ed-del-box">${e.id ? '<button type="button" class="danger" data-ed="gdel">Gruppe löschen</button>' : ''}</div>
+      <div class="row"><button type="button" data-ed="close">Abbrechen</button><button type="submit" class="primary">${e.id ? 'Speichern' : 'Anlegen'}</button></div>
+    </div>
+  </form>`;
+}
+function saveGroup() {
+  const e = ED, name = $('#gr-name').value.trim();
+  if (!name) return toast('Bitte einen Namen eingeben.');
+  if (DB.groups.some(g => g.id !== e.id && g.name.toLowerCase() === name.toLowerCase())) return toast('Eine Gruppe mit diesem Namen gibt es schon.');
+  const accts = $$('#dlg [data-gracct]').filter(c => c.checked).map(c => c.dataset.gracct);
+  const g = e.id ? DB.groups.find(x => x.id === e.id) : (DB.groups.push({ id: 'g' + Date.now() }), DB.groups[DB.groups.length - 1]);
+  Object.assign(g, { name, accts });
+  DB.groups.sort((a, b) => a.name.localeCompare(b.name, 'de'));
+  save(); closeDialog(); render();
+  toast(`Gruppe „${name}“ ${e.id ? 'gespeichert' : 'angelegt'}, ${accts.length} ${accts.length === 1 ? 'Konto' : 'Konten'}.`);
+}
+function groupsPanel() {
+  const rows = DB.groups.map(g => {
+    const accts = g.accts.filter(n => DB.accounts[n]), sum = accts.filter(n => !DB.accounts[n].inactive).reduce((x, n) => x + balance(n), 0);
+    return `<tr><td><b>${esc(g.name)}</b> <button class="icon" data-groupedit="${esc(g.id)}" aria-label="Gruppe ${esc(g.name)} bearbeiten" title="Name und Konten">✎</button>
+      <span class="tags">${accts.map(n => `<span class="chip">${esc(n)}</span>`).join('') || '<span class="muted">keine Konten</span>'}</span></td>
+      <td class="r"><a href="#buchungen" data-acct="g:grp:${esc(g.id)}">Buchungen</a></td><td class="r num ${moneyCls(sum)}">${money(sum)}</td></tr>`;
+  }).join('');
+  return `<div class="panel"><div class="row spread"><h2>Kontogruppen</h2><button id="group-add">+ Gruppe anlegen</button></div>
+    <p class="muted">Nach Kontoart (Girokonten, Tagesgeld, Sparkonten …) gruppiert Kontor von selbst. Eigene Gruppen fassen beliebige Konten zusammen, z. B. „Gemeinsame Konten“ oder „Notgroschen“. Ein Konto darf in mehreren Gruppen stehen. Gruppen erscheinen in der Übersicht und als Filter bei den Buchungen.</p>
+    ${rows ? `<div class="table-wrap"><table><tbody>${rows}</tbody></table></div>` : ''}</div>`;
 }
 /* Institut anlegen oder bearbeiten, mit Kontenzuordnung. back: Kontodialog, zu dem danach zurückgekehrt wird. */
 function openInst(id, opts = {}) {
@@ -1010,6 +1254,7 @@ function renameAccount(from, to) {
   }
   for (const x of [...(DB.loans || []), ...(DB.contracts || []), ...(DB.rules || [])]) if (x.acct === from) x.acct = to;
   for (const s of DB.statements || []) if (s.acct === from) s.acct = to;
+  for (const g of DB.groups || []) g.accts = g.accts.map(n => n === from ? to : n);
   if (UI.f.acct === from) UI.f.acct = to;
 }
 
@@ -2759,18 +3004,33 @@ Views.uebersicht = () => {
       })() : ''}
     </div>
     <div class="panel"><div class="row spread"><h2>Einnahmen und Ausgaben pro Monat</h2>
-      <div class="legend"><span><i style="background:var(--accent)"></i>Einnahmen</span><span><i style="background:var(--minus)"></i>Ausgaben</span></div></div>
+      <div class="legend"><span><i style="background:var(--pos)"></i>Einnahmen</span><span><i style="background:var(--minus)"></i>Ausgaben</span></div></div>
       <div class="table-wrap">${monthChart(inc, out)}</div>
       <p class="muted">Umbuchungen zwischen eigenen Konten sind nicht mitgezählt${xferN ? `, auch nicht ${xferN} ${xferN === 1 ? 'Buchung' : 'Buchungen'} mit einer Kategorie wie „Umbuchung“` : ''}.</p></div>
     <div class="panel"><h2>Ausgaben nach Kategorie ${UI.year}</h2>
       ${catDonuts(byCat)}
       ${unc ? `<p><span class="chip warn">${unc} ohne Kategorie</span> <a href="#buchungen" data-uncat="1">zuordnen</a></p>` : ''}</div>
-    <div class="panel"><h2>Konten</h2><div class="table-wrap"><table><tbody>
-      ${accts.map(a => `<tr><td style="width:44px">${logo(DB.institutes[a.institute], 30)}</td><td><a href="#buchungen" data-acct="${esc(a.name)}">${esc(a.name)}</a><span class="sub">${esc(acctType(a.type))}</span></td><td class="r num ${moneyCls(balance(a.name))}">${money(balance(a.name))}</td></tr>`).join('') || '<tr><td class="muted">Alle Konten sind inaktiv.</td></tr>'}
-    </tbody></table></div>
+    ${overviewAccounts(accts)}
     ${hidden ? `<p class="muted">${hidden} inaktive Konten ausgeblendet. <a href="#konten">Verwalten</a></p>` : ''}</div>`;
 };
 
+/* Konten in der Übersicht: nach Kontoart, nach eigenen Gruppen oder als einfache Liste */
+function overviewAccounts(accts) {
+  let mode = UI.ovGroup;
+  const row = a => `<tr><td style="width:44px">${logo(DB.institutes[a.institute], 30)}</td><td><a href="#buchungen" data-acct="${esc(a.name)}">${esc(a.name)}</a><span class="sub">${esc(acctInfo(a))}</span></td><td class="r num ${moneyCls(balance(a.name))}">${money(balance(a.name))}</td></tr>`;
+  const seg = `<div class="seg" role="group" aria-label="Konten gruppieren">${[['type', 'Nach Art'], ['own', 'Eigene Gruppen'], ['none', 'Liste']].map(([k, l]) => `<button type="button" data-ovgroup="${k}" class="${k === mode ? 'on' : ''}" aria-pressed="${k === mode}">${l}</button>`).join('')}</div>`;
+  let body, hint = '';
+  if (!accts.length) body = '<tr><td class="muted">Alle Konten sind inaktiv.</td></tr>';
+  else if (mode === 'none') body = accts.map(row).join('');
+  else {
+    if (mode === 'own' && !DB.groups.length) hint = '<p class="muted">Noch keine eigenen Gruppen. <a href="#konten">Unter Konten &amp; Daten anlegen</a></p>';
+    body = groupAccounts(accts, mode === 'own' && DB.groups.length ? 'own' : 'type').map(g => {
+      const sum = g.accts.reduce((x, a) => x + balance(a.name), 0);
+      return `<tr class="grp"><td colspan="2">${g.sel ? `<a href="#buchungen" data-acct="${esc(g.sel)}" title="Buchungen dieser Gruppe">${esc(g.name)}</a>` : esc(g.name)} · ${g.accts.length}</td><td class="r num ${moneyCls(sum)}">${money(sum)}</td></tr>` + g.accts.map(row).join('');
+    }).join('');
+  }
+  return `<div class="panel"><div class="row spread"><h2>Konten</h2>${seg}</div>${hint}<div class="table-wrap"><table><tbody>${body}</tbody></table></div>`;
+}
 function monthChart(inc, out) {
   const W = 720, H = 220, L = 70, B = 24, T = 10;
   const max = Math.max(1, ...inc, ...out);
@@ -2838,9 +3098,9 @@ function emptyState() {
 }
 
 function currentTxList() {
-  const f = UI.f;
+  const f = UI.f, set = acctSet(f.acct);
   return DB.tx.filter(t =>
-    (!f.acct || t.acct === f.acct) &&
+    (!set || set.has(t.acct)) &&
     (!f.month || t.date.startsWith(f.month)) &&
     (!f.cat || (f.cat === '__none' ? isUncategorized(t) : f.cat === '__xfer' ? (t.transfer && t.transfer !== t.acct) : f.cat === '__xhint' ? !!transferHint(t, UI.xidx || (UI.xidx = xferIndex())) : (t.category === f.cat || (t.splits || []).some(s => s.category === f.cat)))) &&
     (!f.tag || (f.tag === '__none' ? !(t.tags || []).length : (t.tags || []).includes(f.tag))) &&
@@ -2856,6 +3116,11 @@ Views.buchungen = () => {
   UI.xidx = null;
   list = list.slice().sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
   const sum = list.reduce((s, t) => s + t.amount, 0);
+  // Auswahl gilt nur für die gefilterten Buchungen
+  const inList = new Set(list.map(t => t.id));
+  for (const id of UI.sel) if (!inList.has(id)) UI.sel.delete(id);
+  UI.selOrder = list.slice(0, UI.limit).map(t => t.id);
+  const nSel = UI.sel.size, allSel = nSel && nSel === list.length;
   const monthOpts = ys.map(y => `<optgroup label="${y}"><option value="${y}" ${f.month === y ? 'selected' : ''}>Ganzes Jahr ${y}</option>${MONTHS.map((m, i) => { const v = `${y}-${String(i + 1).padStart(2, '0')}`; return `<option value="${v}" ${f.month === v ? 'selected' : ''}>${m} ${y}</option>`; }).join('')}</optgroup>`).join('');
   const rows = list.slice(0, UI.limit).map(t => {
     let catCell;
@@ -2877,29 +3142,58 @@ Views.buchungen = () => {
     const xr = t.transfer && t.transfer !== t.acct ? (t.amount < 0 ? ' xout' : ' xin') : '';
     const memo = t.payee && t.memo && t.memo !== t.payee ? `<span class="sub clip" title="${esc(t.memo)}">${esc(t.memo)}</span>` : '';
     const tags = (t.tags || []).length ? `<span class="tags">${t.tags.map(g => `<span class="chip tag">${esc(g)}</span>`).join('')}</span>` : '';
-    return `<tr class="${t.date > TODAY ? 'future' : ''}${xr}" data-row="${t.id}"><td class="num">${dDE(t.date)}</td><td>${esc(t.acct)}</td><td>${esc(displayPayee(t)) || '<span class="muted">–</span>'}${memo}${tags}</td><td>${catCell}</td><td class="r num ${moneyCls(t.amount)}">${money(t.amount)}</td>
+    const on = UI.sel.has(t.id);
+    return `<tr class="${t.date > TODAY ? 'future' : ''}${xr}${on ? ' picked' : ''}" data-row="${t.id}"><td class="sel"><input type="checkbox" data-txsel="${t.id}" ${on ? 'checked' : ''} aria-label="Buchung auswählen"></td><td class="num">${dDE(t.date)}</td><td>${esc(t.acct)}</td><td>${esc(displayPayee(t)) || '<span class="muted">–</span>'}${memo}${tags}</td><td>${catCell}</td><td class="r num ${moneyCls(t.amount)}">${money(t.amount)}</td>
       <td class="r"><button class="icon" data-edit="${t.id}" aria-label="Buchung bearbeiten" title="Bearbeiten">✎</button></td></tr>`;
   }).join('');
   return `
     <div class="row spread"><h1>Buchungen</h1><div class="row"><button id="tx-export" title="Exportiert die gefilterten Buchungen">Als CSV exportieren</button><button class="primary" id="tx-new">+ Neue Buchung</button></div></div>
     <div class="panel">
       <div class="row">
-        <select id="f-acct" aria-label="Konto"><option value="">Alle Konten</option>${Object.values(DB.accounts).sort((a, b) => (a.inactive - b.inactive) || a.name.localeCompare(b.name, 'de')).map(a => `<option value="${esc(a.name)}" ${a.name === f.acct ? 'selected' : ''}>${esc(a.name)}${a.inactive ? ' (inaktiv)' : ''}</option>`).join('')}</select>
+        <select id="f-acct" aria-label="Konto oder Kontogruppe"><option value="">Alle Konten</option>${acctFilterOptions(f.acct)}</select>
         <select id="f-month" aria-label="Zeitraum"><option value="">Alle Zeiträume</option>${monthOpts}</select>
         <select id="f-cat" aria-label="Kategorie"><option value="">Alle Kategorien</option><option value="__none" ${f.cat === '__none' ? 'selected' : ''}>Ohne Kategorie</option><option value="__xfer" ${f.cat === '__xfer' ? 'selected' : ''}>Nur Umbuchungen</option><option value="__xhint" ${f.cat === '__xhint' ? 'selected' : ''}>Mögliche Umbuchungen</option>${cats.map(c => `<option ${c === f.cat ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
         <select id="f-tag" aria-label="Tag"><option value="">Alle Tags</option><option value="__none" ${f.tag === '__none' ? 'selected' : ''}>Ohne Tag</option>${DB.tags.map(g => `<option ${g === f.tag ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select>
         <input id="f-q" type="search" placeholder="Suche (Empfänger, Memo, Tag, Betrag)" value="${esc(f.q)}" style="flex:1 1 200px">
         ${f.acct || f.month || f.cat || f.tag || f.q ? '<button id="f-reset">Filter löschen</button>' : ''}
       </div>
-      <div class="row spread"><span class="muted">${list.length} Buchungen · Doppelklick auf eine Zeile öffnet sie<span class="xlegend"><span class="chip tout">→ nach</span><span class="chip tin">← von</span></span></span><span>Summe <b class="num ${moneyCls(sum)}">${money(sum)}</b></span></div>
+      ${nSel ? selectionBar(list) : ''}
+      <div class="row spread"><span class="muted">${list.length} Buchungen · Haken für Mehrfachauswahl, mit Umschalt einen Bereich · Doppelklick öffnet eine Buchung<span class="xlegend"><span class="chip tout">→ nach</span><span class="chip tin">← von</span></span></span><span>Summe <b class="num ${moneyCls(sum)}">${money(sum)}</b></span></div>
       <div class="table-wrap"><table>
-        <thead><tr><th>Datum</th><th>Konto</th><th>Empfänger / Memo</th><th>Kategorie</th><th class="r">Betrag</th><th></th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="6" class="muted">Keine Buchungen für diesen Filter.</td></tr>'}</tbody>
+        <thead><tr><th class="sel"><input type="checkbox" id="sel-all" ${allSel ? 'checked' : ''} aria-label="Alle ${list.length} gefilterten Buchungen auswählen" title="Alle ${list.length} gefilterten Buchungen auswählen"></th><th>Datum</th><th>Konto</th><th>Empfänger / Memo</th><th>Kategorie</th><th class="r">Betrag</th><th></th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="7" class="muted">Keine Buchungen für diesen Filter.</td></tr>'}</tbody>
       </table></div>
       ${list.length > UI.limit ? `<button id="more">Weitere ${Math.min(150, list.length - UI.limit)} anzeigen</button>` : ''}
     </div>`;
 };
 
+/* Leiste für ausgewählte Buchungen: Tags vergeben und entfernen */
+function selectionBar(list) {
+  const sel = list.filter(t => UI.sel.has(t.id)), sum = sel.reduce((s, t) => s + t.amount, 0);
+  const cnt = {}; for (const t of sel) for (const g of t.tags || []) cnt[g] = (cnt[g] || 0) + 1;
+  const present = Object.keys(cnt).sort((a, b) => a.localeCompare(b, 'de'));
+  return `<div class="selbar row" role="region" aria-label="Auswahl">
+    <b>${sel.length} ausgewählt</b><span class="num ${moneyCls(sum)}">${money(sum)}</span>
+    <span class="row nowrap"><input type="text" id="sel-tag" list="taglist" placeholder="Tag eingeben oder wählen" aria-label="Tag für die Auswahl"><button class="primary" id="sel-tagadd">Tag vergeben</button></span>
+    ${present.length ? `<select id="sel-tagrm" aria-label="Tag aus der Auswahl entfernen"><option value="">Tag entfernen …</option>${present.map(g => `<option value="${esc(g)}">${esc(g)} (${cnt[g]})</option>`).join('')}</select>` : ''}
+    <button id="sel-clear">Auswahl aufheben</button></div>`;
+}
+/* Tag bei allen ausgewählten Buchungen setzen oder entfernen; verknüpfte Gegenbuchungen ziehen mit */
+function bulkTag(tag, add) {
+  const ids = new Set(UI.sel);
+  for (const t of DB.tx) if (ids.has(t.id) && t.link) ids.add(t.link);
+  const snap = DB.tx.filter(t => ids.has(t.id)).map(t => [t, (t.tags || []).slice()]);
+  let n = 0;
+  for (const [t] of snap) {
+    const has = (t.tags || []).includes(tag);
+    if (add && !has) { t.tags = [...(t.tags || []), tag]; if (UI.sel.has(t.id)) n++; }
+    if (!add && has) { t.tags = t.tags.filter(g => g !== tag); if (UI.sel.has(t.id)) n++; }
+  }
+  if (add && !DB.tags.includes(tag)) { DB.tags.push(tag); DB.tags.sort((a, b) => a.localeCompare(b, 'de')); }
+  save(); render();
+  toast(add ? `Tag „${tag}“ bei ${n} ${n === 1 ? 'Buchung' : 'Buchungen'} vergeben.` : `Tag „${tag}“ bei ${n} ${n === 1 ? 'Buchung' : 'Buchungen'} entfernt.`,
+    { label: 'Rückgängig', run: () => { for (const [t, tags] of snap) t.tags = tags; save(); render(); toast('Rückgängig gemacht.'); } }, 10000);
+}
 Views.kategorien = () => {
   const tabs = `<div class="tabs" role="tablist">
       <button role="tab" data-cattab="report" aria-selected="${UI.catTab === 'report'}">Auswertung</button>
@@ -3381,7 +3675,7 @@ function accountRows(list) {
       const ib = a.iban ? (ibanOk(a.iban) ? '<span class="chip ok">IBAN gültig</span>' : '<span class="chip warn">IBAN prüfen</span>') : '';
       return `<tr class="${a.inactive ? 'inactive' : ''}${a.locked ? ' locked' : ''}">
         <td><input type="checkbox" id="act-${s}" data-active="${esc(a.name)}" ${a.inactive ? '' : 'checked'} aria-label="${esc(a.name)} aktiv"></td>
-        <td><b>${esc(a.name)}</b> <button class="icon" data-acctedit="${esc(a.name)}" aria-label="Konto ${esc(a.name)} bearbeiten" title="Name und Art ändern">✎</button><span class="sub">${esc(acctType(a.type))}</span>
+        <td><b>${esc(a.name)}</b> <button class="icon" data-acctedit="${esc(a.name)}" aria-label="Konto ${esc(a.name)} bearbeiten" title="Name und Art ändern">✎</button><span class="sub">${esc(acctInfo(a))}</span>
           <select id="inst-${s}" data-acct-inst="${esc(a.name)}" class="mini" aria-label="Institut für ${esc(a.name)}">${instOpts(a.institute)}</select></td>
         <td><input type="text" id="iban-${s}" data-acct-field="iban" data-acct="${esc(a.name)}" value="${esc(fmtIban(a.iban))}" placeholder="DE00 0000 0000 0000 0000 00" style="width:230px" aria-label="IBAN ${esc(a.name)}">
           <span class="sub">${a.number ? 'Kontonr. ' + esc(a.number) + ' ' : ''}${ib}${(() => { const n = (DB.statements || []).filter(s => s.acct === a.name).length; return n ? ` <a href="#statements" data-stmtjump="${esc(a.name)}">${n} ${n === 1 ? 'Auszug' : 'Auszüge'}</a>` : ''; })()}</span></td>
@@ -3460,6 +3754,7 @@ Views.konten = () => {
     ${accts.length || insts.length ? '' : '<div class="panel"><p class="muted">Noch keine Konten. Sie entstehen beim Import.</p></div>'}
     ${insts.map(i => instPanel(i, accts.filter(a => a.institute === i.id))).join('')}
     ${none.length ? instPanel(null, none) : ''}
+    ${groupsPanel()}
     ${loanAccts.length ? `<div class="panel"><h2>Als Kredit geführt</h2>
       <p class="muted">Diese Konten stehen unter Kredite &amp; Schulden und zählen nicht zum Gesamtsaldo.</p>
       <table><tbody>${loanAccts.map(a => { const l = loanOfAcct(a.name); return `<tr><td style="width:44px">${logo(DB.institutes[a.institute], 30)}</td><td><b>${esc(a.name)}</b><span class="sub">Kredit „${esc(l.name)}“ · ${DB.tx.filter(t => t.acct === a.name).length} Buchungen</span></td>
@@ -3494,7 +3789,7 @@ async function readFile(file) {
 }
 function queueStatements(files) {
   UI.stmtFiles = (UI.stmtFiles || []).concat(files);
-  if (!UI.stmtAcct && UI.f.acct) UI.stmtAcct = UI.f.acct;
+  if (!UI.stmtAcct && UI.f.acct && !isGroupSel(UI.f.acct)) UI.stmtAcct = UI.f.acct;
   if (location.hash !== '#konten') location.hash = 'konten'; else render();
   setTimeout(() => { const el = $('#statements'); if (el) el.scrollIntoView({ block: 'start' }); }, 50);
 }
@@ -3562,6 +3857,7 @@ function render() {
   const fn = Views[view] || Views.uebersicht;
   $$('#nav a').forEach(a => a.getAttribute('href') === '#' + (Views[view] ? view : 'uebersicht') ? a.setAttribute('aria-current', 'page') : a.removeAttribute('aria-current'));
   $('#catlist').innerHTML = allCategories().map(c => `<option value="${esc(c)}">`).join('');
+  $('#taglist').innerHTML = DB.tags.map(g => `<option value="${esc(g)}">`).join('');
   $('#main').innerHTML = fn();
   const n = contractAlerts().length, b = $('#co-badge');
   b.hidden = !n; b.textContent = n; b.title = n ? `${n} Kündigungsfristen bald fällig` : '';
@@ -3585,6 +3881,7 @@ document.addEventListener('change', e => {
     UI.open[id + 'sim'] = true; render();
   }
   else if (t.dataset.ruleactive) { const r = DB.rules.find(x => x.id === t.dataset.ruleactive); r.active = t.checked; save(); render(); }
+  else if (t.id === 'sel-tagrm') { if (t.value) bulkTag(t.value, false); }
   else if (t.id === 'f-tag') { UI.f.tag = t.value; UI.limit = 150; render(); }
   else if (t.dataset.catname) {
     const from = t.dataset.catname, to = t.value.trim();
@@ -3695,7 +3992,13 @@ document.addEventListener('input', e => {
 
 function dialogChange(t) {
   if (!ED) return;
-  if (ED.mode === 'acct') { if (t.id === 'ac-inst' && t.value === '__new') openInst(null, { back: Object.assign({}, ED, { name: $('#ac-name').value, type: $('#ac-type').value, openRaw: $('#ac-open') ? $('#ac-open').value : '' }) }); return; }
+  if (ED.mode === 'prefs') { if (/^pf-/.test(t.name)) { Prefs.set(t.name.slice(3), t.value); showDialog(); } return; }
+  if (ED.mode === 'acct') {
+    if (t.id === 'ac-inst' && t.value === '__new') { readAcct(); openInst(null, { back: Object.assign({}, ED) }); }
+    else if (t.id === 'ac-type' || t.id === 'pe-kind' || t.id === 'pe-date' || /^rt-/.test(t.id)) { readAcct(); showDialog(); }
+    return;
+  }
+  if (ED.mode === 'group') return;
   if (ED.mode === 'inst') return;
   if (ED.mode === 'fints') { if (t.dataset.fimap !== undefined) { ED.map[t.dataset.fimap] = t.value; showDialog(); } return; }
   if (ED.mode === 'rule') return updateRulePreview();
@@ -3719,11 +4022,22 @@ function dialogChange(t) {
 document.addEventListener('submit', e => {
   if (e.target.id !== 'ed-form') return;
   e.preventDefault();
-  if (ED && ED.mode === 'tx') saveTx(); else if (ED && ED.mode === 'acct') saveAcct(); else if (ED && ED.mode === 'rule') saveRule(); else if (ED && ED.mode === 'contract') saveContract(); else if (ED && ED.mode === 'loan') saveLoan(); else if (ED && ED.mode === 'inst') saveInst(); else if (ED && ED.mode === 'fints') fintsSubmit();
+  if (ED && ED.mode === 'tx') saveTx(); else if (ED && ED.mode === 'acct') saveAcct(); else if (ED && ED.mode === 'rule') saveRule(); else if (ED && ED.mode === 'contract') saveContract(); else if (ED && ED.mode === 'loan') saveLoan(); else if (ED && ED.mode === 'inst') saveInst(); else if (ED && ED.mode === 'fints') fintsSubmit(); else if (ED && ED.mode === 'group') saveGroup();
 });
 document.addEventListener('dblclick', e => {
   const tr = e.target.closest('tr[data-row]');
   if (tr && !e.target.closest('input, button, select')) openTx(+tr.dataset.row);
+});
+/* Mehrfachauswahl: Haken pro Zeile, Umschalt+Klick wählt den Bereich seit dem letzten Haken */
+document.addEventListener('click', e => {
+  const c = e.target.closest('input[data-txsel], input#sel-all'); if (!c) return;
+  if (c.id === 'sel-all') { if (c.checked) currentTxList().forEach(t => UI.sel.add(t.id)); else UI.sel.clear(); UI.lastSel = null; return render(); }
+  const id = +c.dataset.txsel, order = UI.selOrder || [];
+  if (e.shiftKey && UI.lastSel != null && order.includes(UI.lastSel)) {
+    const [i, j] = [order.indexOf(UI.lastSel), order.indexOf(id)].sort((a, b) => a - b);
+    for (const x of order.slice(i, j + 1)) c.checked ? UI.sel.add(x) : UI.sel.delete(x);
+  } else c.checked ? UI.sel.add(id) : UI.sel.delete(id);
+  UI.lastSel = id; render();
 });
 $('#dlg').addEventListener('close', () => { Fints.stop(); ED = null; });
 
@@ -3752,11 +4066,19 @@ function editorClick(t) {
     else if (a === 'cdel-no') { readContract(); showDialog(); }
     return;
   }
+  if (ED.mode === 'group') {
+    if (a === 'gdel') $('#ed-del-box').innerHTML = '<span>Gruppe löschen? Die Konten bleiben erhalten.</span><button type="button" class="danger" data-ed="gdel-yes">Ja, löschen</button><button type="button" data-ed="gdel-no">Nein</button>';
+    else if (a === 'gdel-yes') { const g = DB.groups.find(x => x.id === ED.id); DB.groups = DB.groups.filter(x => x.id !== ED.id); if (UI.f.acct === 'g:grp:' + ED.id) UI.f.acct = ''; save(); closeDialog(); render(); toast(`Gruppe „${g ? g.name : ''}“ gelöscht.`); }
+    else if (a === 'gdel-no') { ED.name = $('#gr-name').value; ED.accts = new Set($$('#dlg [data-gracct]').filter(c => c.checked).map(c => c.dataset.gracct)); showDialog(); }
+    return;
+  }
   if (ED.mode === 'acct') {
     if (a === 'del') { $('#ed-del-box').innerHTML = '<span>Konto wirklich löschen?</span><button type="button" class="danger" data-ed="del-yes">Ja, löschen</button><button type="button" data-ed="del-no">Nein</button>'; }
-    else if (a === 'del-yes') { const n = ED.orig; delete DB.accounts[n]; if (UI.f.acct === n) UI.f.acct = ''; save(); closeDialog(); render(); toast(`Konto „${n}“ gelöscht.`); }
+    else if (a === 'del-yes') { const n = ED.orig; delete DB.accounts[n]; for (const g of DB.groups) g.accts = g.accts.filter(x => x !== n); if (UI.f.acct === n) UI.f.acct = ''; save(); closeDialog(); render(); toast(`Konto „${n}“ gelöscht.`); }
     else if (a === 'del-no') showDialog();
     else if (a === 'toloan') { const n = ED.orig; closeDialog(); acctToLoan(n); }
+    else if (a === 'addrate') { readAcct(); const last = ED.rates[ED.rates.length - 1]; ED.rates.push({ from: TODAY, rate: last ? last.rate : '' }); showDialog(); const el = $('#rt-rate-' + (ED.rates.length - 1)); if (el) el.focus(); }
+    else if (a === 'rmrate') { readAcct(); ED.rates.splice(+t.dataset.i, 1); showDialog(); }
     else if (a === 'unloan') { const l = loanOfAcct(ED.orig); if (l) { l.acct = ''; save(); } closeDialog(); render(); toast('Das Konto wird wieder bei den Konten geführt.'); }
     return;
   }
@@ -3788,6 +4110,14 @@ document.addEventListener('click', e => {
   if (t.dataset.ed && ED) return editorClick(t);
   if (t.dataset.addtag) { const i = $('#ed-tags'); i.value = parseTags(i.value + ',' + t.dataset.addtag).join(', '); t.remove(); return; }
   if (t.id === 'quotes-refresh') return refreshQuotes();
+  if (t.id === 'sel-clear') { UI.sel.clear(); return render(); }
+  if (t.id === 'sel-tagadd') {
+    const g = $('#sel-tag').value.trim();
+    if (!g) { toast('Bitte einen Tag eingeben oder auswählen.'); return $('#sel-tag').focus(); }
+    if (g.includes(',')) return toast('Ein Tag darf kein Komma enthalten.');
+    return bulkTag(g, true);
+  }
+  if (t.id === 'prefs-open') { ED = { mode: 'prefs' }; return showDialog(); }
   if (t.id === 'drop-run') return Drop.run(true);
   if (t.dataset.inimport || t.dataset.instore || t.dataset.inretry || t.dataset.intrash) {
     const i = +(t.dataset.inimport || t.dataset.instore || t.dataset.inretry || t.dataset.intrash), r = Drop.state && Drop.state.inbox[i]; if (!r) return;
@@ -3812,6 +4142,9 @@ document.addEventListener('click', e => {
   if (t.dataset.xpick) { UI.xpick = +t.dataset.xpick; render(); const s = $('#xf-' + t.dataset.xpick); if (s) { s.focus(); try { s.showPicker(); } catch (err) {} } return; }
   if (t.dataset.xset) return setTransfer(+t.dataset.xset, t.dataset.to);
   if (t.id === 'acct-new') return openAcct(null);
+  if (t.id === 'group-add') return openGroup(null);
+  if (t.dataset.groupedit) return openGroup(t.dataset.groupedit);
+  if (t.dataset.ovgroup) { UI.ovGroup = t.dataset.ovgroup; try { localStorage.setItem('kontor-ovgroup', UI.ovGroup); } catch (err) { } return render(); }
   if (t.id === 'inst-add') return openInst(null);
   if (t.dataset.instedit) return openInst(t.dataset.instedit);
   if (t.dataset.bankfix) { const a = DB.accounts[t.dataset.bankfix]; if (a && a.bank) setBankBalance(a.name, a.bank.amount, a.bank.date); return; }
@@ -3956,7 +4289,7 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('keydown', e => {
   if (e.key !== 'Enter') return;
-  const map = { 'cat-new': '#cat-add', 'tag-new': '#tag-add' };
+  const map = { 'cat-new': '#cat-add', 'tag-new': '#tag-add', 'sel-tag': '#sel-tagadd' };
   if (map[e.target.id]) { e.preventDefault(); $(map[e.target.id]).click(); }
 });
 document.addEventListener('toggle', e => { const d = e.target; if (d.dataset && d.dataset.key) UI.open[d.dataset.key] = d.open; }, true);
