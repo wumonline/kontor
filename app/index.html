@@ -277,6 +277,9 @@ button.clip { border: 0; background: none; padding: 0 2px; color: var(--muted); 
 .chart .fc { fill: none; stroke-width: 2.5; stroke-linejoin: round; }
 .chart .fc.s0 { stroke: var(--muted); stroke-dasharray: 5 4; } .chart .fc.s1 { stroke: var(--accent); } .chart .fc.s2 { stroke: var(--c7); }
 .chart .fc-lbl { font-size: 0.786rem; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }
+.pens-card .head { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: flex-start; }
+.pens-card dl.facts { margin-top: 12px; }
+.pens-card .funds { font-size: 0.929rem; }
 .chart .fc-lbl.s0 { fill: var(--muted); } .chart .fc-lbl.s1 { fill: var(--accent); } .chart .fc-lbl.s2 { fill: var(--c7); }
 .legend button.lg { background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; display: inline-flex; align-items: center; }
 .legend button.lg:hover { color: var(--fg); }
@@ -304,6 +307,7 @@ button.clip { border: 0; background: none; padding: 0 2px; color: var(--muted); 
       <a href="#regeln">Regeln</a>
       <a href="#vertraege">Verträge &amp; Abos <span class="badge" id="co-badge" hidden></span></a>
       <a href="#depot">Depot</a>
+      <a href="#rente">Rentenverträge</a>
       <a href="#kredite">Kredite &amp; Schulden</a>
       <a href="#import">Import <span class="badge" id="in-badge" hidden></span></a>
       <a href="#konten">Konten &amp; Daten</a>
@@ -1386,7 +1390,9 @@ function forecastChart(fc) {
   const x = m => L + (W - L - R) * m / n, y = v => T + (H - T - B) * (1 - (v - lo) / Math.max(1, hi - lo));
   let g = ''; for (let v = lo; v <= hi + 1; v += step) g += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${EUR.format(v / 100).replace(/,00\s?€/, ' €')}</text>`;
   const y0 = +TODAY.slice(0, 4), y1 = +fc.date.slice(0, 4);
-  for (let yr = y0 + 1; yr <= y1; yr++) { const m = monthsUntil(`${yr}-01-01`); if (m > 0 && m < n) g += `<text x="${x(m)}" y="${H - 6}" text-anchor="middle">${yr}</text>`; }
+  // Jahreszahlen nur so dicht, dass sie sich nicht überlappen (jedes, jedes 2., 5. oder 10. Jahr)
+  const perYear = (W - L - R) * 12 / n, every = [1, 2, 5, 10, 20].find(k => k * perYear >= 40) || 25;
+  for (let yr = y0 + 1; yr <= y1; yr++) { if (yr % every) continue; const m = monthsUntil(`${yr}-01-01`); if (m > 0 && m < n) g += `<text x="${x(m)}" y="${H - 6}" text-anchor="middle">${yr}</text>`; }
   // Beschriftungen am Ende mit mindestens 13 px Abstand, von unten nach oben
   const ly = fc.scen.map(s => y(s.value) + 4);
   for (let i = ly.length - 2; i >= 0; i--) if (ly[i] - ly[i + 1] < 13) ly[i] = ly[i + 1] + 13;
@@ -3721,7 +3727,7 @@ Views.uebersicht = () => {
       ${(() => {
         const pv = Object.values(DB.accounts).filter(a => a.type === 'Pens' && !a.inactive).map(pensionValue).filter(Boolean);
         if (!pv.length) return '';
-        return `<div class="kpi"><div class="label"><a href="#konten">Rentenverträge</a></div><div class="value num">${money(pv.reduce((s, x) => s + x.value, 0))}</div><div class="sub muted">Fondsguthaben${pv.some(x => x.live) ? ' zum aktuellen Kurs' : ''}</div></div>`;
+        return `<div class="kpi"><div class="label"><a href="#rente">Rentenverträge</a></div><div class="value num">${money(pv.reduce((s, x) => s + x.value, 0))}</div><div class="sub muted">Fondsguthaben${pv.some(x => x.live) ? ' zum aktuellen Kurs' : ''}</div></div>`;
       })()}
       <div class="kpi"><div class="label">Einnahmen ${UI.year}</div><div class="value num">${money(sumIn)}</div></div>
       <div class="kpi"><div class="label">Ausgaben ${UI.year}</div><div class="value num">${money(sumOut)}</div></div>
@@ -4353,6 +4359,70 @@ async function refreshQuotes(silent) {
   } catch (e) { toast('Kurse konnten nicht geladen werden: ' + e.message); }
   finally { UI.quoting = false; render(); }
 }
+/* ---------- Rentenverträge: Übersicht aller Rentenkonten mit Prognose ---------- */
+/* Guthaben nach m Monaten: Startwert verzinst plus monatliche Beiträge (wie pensionForecast, aber für jeden Monat) */
+function fcValueAt(v0, c, g, m) {
+  const r = Math.pow(1 + g / 100, 1 / 12) - 1;
+  if (!m) return v0;
+  const f = Math.pow(1 + r, m);
+  return r ? v0 * f + c * (f - 1) / r : v0 + c * m;
+}
+/* Gemeinsame Prognose: jeder Vertrag wächst bis zu seinem Auszahlungstag und bleibt danach stehen */
+function pensionForecastAll(list) {
+  const fcs = list.map(a => ({ a, fc: pensionForecast(a) })).filter(x => x.fc);
+  if (!fcs.length) return null;
+  const n = Math.max(...fcs.map(x => x.fc.months)), date = fcs.map(x => x.fc.date).sort().pop();
+  const scen = [0, 1, 2].map(i => {
+    const at = m => fcs.reduce((sum, { fc }) => sum + fcValueAt(fc.now, fc.contrib.amount, fc.scen[i].g, Math.min(m, fc.months)), 0);
+    const path = []; for (let m = 0; m <= n; m++) if (m === n || m % 3 === 0) path.push([m, at(m)]);
+    const value = Math.round(at(n));
+    return { name: FC_NAMES[i], g: fcs.length === 1 ? fcs[0].fc.scen[i].g : null, value, path, rent: fcs.reduce((x, { fc }) => x + (fc.scen[i].rent || 0), 0) || null };
+  });
+  return { now: fcs.reduce((x, { fc }) => x + fc.now, 0), months: n, date, scen, n: fcs.length };
+}
+const pensionPaidIn = a => DB.tx.filter(t => t.acct === a.name && t.amount > 0 && t.date <= TODAY).reduce((x, t) => x + t.amount, 0);
+Views.rente = () => {
+  const list = Object.values(DB.accounts).filter(a => a.type === 'Pens' && !a.inactive).sort((a, b) => ((a.pension || {}).date || '9').localeCompare((b.pension || {}).date || '9') || a.name.localeCompare(b.name, 'de'));
+  const head = `<div class="row spread"><h1>Rentenverträge</h1><button id="pens-new">+ Rentenvertrag anlegen</button></div>`;
+  if (!list.length) return head + `<div class="panel empty"><p class="muted">Noch kein Rentenvertrag. Lege ein Konto mit der Art „Rentenkonto“ an und trag Auszahlungstermin, Vertragsnummer und Fondsanteile ein. Dann siehst du hier alle Verträge mit Prognose zum Auszahlungstag.</p></div>`;
+  const vals = list.map(a => ({ a, v: pensionValue(a), fc: pensionForecast(a), c: pensionContrib(a), paid: pensionPaidIn(a), miss: pensionMissing(a.pension || {}) }));
+  const total = vals.reduce((x, r) => x + (r.v ? r.v.value : 0), 0), contrib = vals.reduce((x, r) => x + (r.fc || (r.a.pension || {}).date > TODAY ? r.c.amount : 0), 0);
+  const paid = vals.reduce((x, r) => x + r.paid, 0), all = pensionForecastAll(list);
+  const fixedRent = list.filter(a => (a.pension || {}).kind === 'monthly' && a.pension.amount > 0).reduce((x, a) => x + a.pension.amount, 0);
+  const kpis = `<div class="kpis">
+      <div class="kpi"><div class="label">Fondsguthaben heute</div><div class="value num">${money(total)}</div><div class="sub muted">${vals.filter(r => r.v).length} von ${list.length} ${list.length === 1 ? 'Vertrag' : 'Verträgen'} bewertet</div></div>
+      <div class="kpi"><div class="label">Beiträge im Monat</div><div class="value num">${money(contrib)}</div><div class="sub muted">eingezahlt bisher ${money(paid)}</div></div>
+      ${all ? `<div class="kpi"><div class="label">Prognose bis ${dDE(all.date)}</div><div class="value num">${money(all.scen[1].value)}</div><div class="sub muted">mittel; ${money(all.scen[0].value)} bis ${money(all.scen[2].value)}</div></div>` : ''}
+      ${all && all.scen[1].rent ? `<div class="kpi"><div class="label">Monatsrente laut Prognose</div><div class="value num">${money(all.scen[1].rent)}</div><div class="sub muted">mittel, über den Rentenfaktor</div></div>` : fixedRent ? `<div class="kpi"><div class="label">Zugesagte Monatsrente</div><div class="value num">${money(fixedRent)}</div></div>` : ''}
+    </div>`;
+  const sumPanel = all && all.n > 1 ? `<div class="panel"><h2>Alle Verträge zusammen</h2>
+      <p class="muted">Jeder Vertrag wächst mit seiner eigenen Annahme bis zu seinem Auszahlungstag und bleibt danach stehen. Wertentwicklung nach Kosten, nicht garantiert.</p>
+      ${forecastChart(all)}</div>` : '';
+  const card = ({ a, v, fc, c, paid: pin, miss }) => {
+    const p = a.pension || {}, funds = (p.funds || []).filter(f => f.name || f.isin);
+    const facts = [
+      ['Vertragsnummer', esc(p.contract || '–')],
+      [p.kind === 'monthly' ? 'Rentenbeginn' : 'Auszahlung', p.date ? `${dDE(p.date)}${p.date > TODAY ? ` <span class="muted">(${untilText(p.date)})</span>` : ''}` : '<span class="neg">fehlt</span>'],
+      [p.kind === 'monthly' ? 'Zugesagte Rente' : 'Erwartete Auszahlung', p.amount ? money(p.amount) + (p.kind === 'monthly' ? ' im Monat' : '') : '–'],
+      ['Fondsguthaben', v ? `${money(v.value)}${v.date ? ` <span class="muted">(${v.live ? 'Kurs' : 'Stand'} ${dDE(v.date)})</span>` : ''}` : '<span class="muted">nicht bewertet</span>'],
+      ['Beitrag im Monat', c.amount ? `${money(c.amount)}${c.manual ? '' : ' <span class="muted">(Ø 12 Monate)</span>'}` : '–'],
+      ['Eingezahlt bisher', pin ? `<a href="#buchungen" data-acct="${esc(a.name)}">${money(pin)}</a>` : '–']];
+    const fcTable = fc ? `<div class="table-wrap"><table><thead><tr><th>Annahme</th><th class="r">Guthaben am ${dDE(fc.date)}</th><th class="r">Wertzuwachs</th>${fc.scen.some(x => x.rent) ? '<th class="r">Monatsrente</th>' : ''}</tr></thead><tbody>
+        ${fc.scen.map(x => `<tr><td>${x.name}, ${x.g.toLocaleString('de-DE')} %</td><td class="r num"><b>${money(x.value)}</b></td><td class="r num ${moneyCls(x.gain)}">${money(x.gain)}</td>${fc.scen.some(y => y.rent) ? `<td class="r num">${x.rent ? money(x.rent) : '–'}</td>` : ''}</tr>`).join('')}
+      </tbody></table></div>${forecastChart(fc)}`
+      : `<p class="muted">${!p.date ? 'Für die Prognose fehlt der Auszahlungstermin.' : p.date <= TODAY ? 'Der Auszahlungstermin ist erreicht.' : 'Für die Prognose fehlen Fondsanteile mit Kurs.'}</p>`;
+    return `<div class="panel pens-card">
+      <div class="head"><div><h2>${esc(a.name)}</h2><span class="muted">${esc(PAYOUT[p.kind] || 'Rentenversicherung')}${DB.institutes[a.institute] ? ' · ' + esc(DB.institutes[a.institute].name) : ''}</span></div>
+        <div class="row"><a class="btn" href="#buchungen" data-acct="${esc(a.name)}">Buchungen</a><button data-acctedit="${esc(a.name)}">Bearbeiten</button></div></div>
+      ${miss.length ? `<p class="missing-note">Noch offen: ${esc(miss.join(', '))}. <button type="button" class="linkish" data-acctedit="${esc(a.name)}">Ergänzen</button></p>` : ''}
+      <dl class="facts">${facts.map(([k, x]) => `<div><dt>${k}</dt><dd>${x}</dd></div>`).join('')}</dl>
+      ${funds.length ? `<p class="funds muted">Fonds: ${funds.map(f => `${esc(f.name || f.isin)}${f.units > 0 ? ` (${f.units.toLocaleString('de-DE', { maximumFractionDigits: 4 })} Anteile)` : ''}`).join(', ')}</p>` : ''}
+      <h3>Prognose zum Auszahlungstag</h3>${fcTable}
+    </div>`;
+  };
+  return head + kpis + sumPanel + vals.map(card).join('')
+    + `<p class="muted">Annahmen, Beitrag und Rentenfaktor änderst du beim jeweiligen Vertrag unter „Bearbeiten“.</p>`;
+};
 Views.depot = () => {
   const depots = Object.values(DB.accounts).filter(a => isDepot(a) && (!a.inactive || depotPositions(a.name).some(p => p.open))).sort((a, b) => a.name.localeCompare(b.name, 'de'));
   const age = quoteAge();
@@ -5213,6 +5283,7 @@ document.addEventListener('click', e => {
       { label: 'Rückgängig', run: () => { undoChanges(changes); DB.rules = DB.rules.filter(x => x.id !== r.id); save(); render(); } }, 10000);
   }
   if (t.dataset.acctedit) return openAcct(t.dataset.acctedit);
+  if (t.id === 'pens-new') { openAcct(null); if (ED && ED.mode === 'acct') { ED.type = 'Pens'; showDialog(); } return; }
   if (t.dataset.cattab) { UI.catTab = t.dataset.cattab; return render(); }
   if (t.dataset.catfilter) { UI.f = Object.assign(NOFILTER(), { cat: t.dataset.catfilter }); return; }
   if (t.dataset.tagfilter) { UI.f = Object.assign(NOFILTER(), { tag: t.dataset.tagfilter }); return; }
