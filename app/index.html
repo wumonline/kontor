@@ -263,6 +263,13 @@ button.clip { border: 0; background: none; padding: 0 2px; color: var(--muted); 
 .sankey g.n:hover text { font-weight: 600; }
 .legend i.k-in { background: var(--pos); } .legend i.k-x { background: var(--tin); } .legend i.k-out { background: var(--minus); } .legend i.k-keep { background: var(--c4); } .legend i.k-res { background: var(--muted); } .legend i.k-save { background: var(--c7); } .legend i.k-tilg { background: var(--c5); }
 .chart .save { fill: var(--c7); }
+.chart .fc { fill: none; stroke-width: 2.5; stroke-linejoin: round; }
+.chart .fc.s0 { stroke: var(--muted); stroke-dasharray: 5 4; } .chart .fc.s1 { stroke: var(--accent); } .chart .fc.s2 { stroke: var(--c7); }
+.chart .fc-lbl { font-size: 0.786rem; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; }
+.chart .fc-lbl.s0 { fill: var(--muted); } .chart .fc-lbl.s1 { fill: var(--accent); } .chart .fc-lbl.s2 { fill: var(--c7); }
+.legend button.lg { background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; display: inline-flex; align-items: center; }
+.legend button.lg:hover { color: var(--fg); }
+.legend button.lg[aria-pressed="false"] { text-decoration: line-through; opacity: .55; }
 @media (max-width: 760px) {
   .app { grid-template-columns: 1fr; }
   .nav { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 12px 16px; gap: 8px; }
@@ -945,6 +952,33 @@ function pensionValue(a) {
   }
   return { value, live, date, units: funds.reduce((x, f) => x + f.units, 0), n: funds.length };
 }
+/* ---------- Prognose zum Auszahlungstag ----------
+   Heutiges Fondsguthaben plus monatliche Beiträge bis zum Auszahlungstermin, monatlich verzinst mit einer
+   angenommenen Wertentwicklung nach Kosten. Beitrag: von Hand oder Durchschnitt der Beiträge der letzten 12 Monate. */
+const FC_DEFAULT = [2, 5, 7], FC_NAMES = ['vorsichtig', 'mittel', 'gut'];
+function pensionContrib(a) {
+  const p = a.pension || {};
+  if (p.contrib != null && p.contrib !== '') return { amount: +p.contrib, manual: true };
+  const from = addMonths(TODAY, -12), list = DB.tx.filter(t => t.acct === a.name && t.amount > 0 && t.date > from && t.date <= TODAY && t.transfer);
+  if (!list.length) return { amount: 0, manual: false };
+  const first = list.reduce((m, t) => t.date < m ? t.date : m, TODAY);
+  const months = Math.max(1, Math.min(12, Math.round(daysBetween(first, TODAY) / 30.44) + 1));
+  return { amount: Math.round(list.reduce((x, t) => x + t.amount, 0) / months), manual: false, n: list.length };
+}
+function monthsUntil(d) { const a = new Date(TODAY), b = new Date(d); return Math.max(0, (b.getFullYear() - a.getFullYear()) * 12 + b.getMonth() - a.getMonth() - (b.getDate() < a.getDate() ? 1 : 0)); }
+function pensionForecast(a) {
+  const p = a.pension || {}, v = pensionValue(a);
+  if (!v || !p.date || p.date <= TODAY) return null;
+  const n = monthsUntil(p.date), c = pensionContrib(a), growth = (p.growth && p.growth.length === 3 ? p.growth : FC_DEFAULT).map(Number);
+  const scen = growth.map((g, i) => {
+    const r = Math.pow(1 + g / 100, 1 / 12) - 1, path = [];
+    let val = v.value;
+    for (let m = 0; m <= n; m++) { if (m) val = val * (1 + r) + c.amount; if (m === n || m % 3 === 0) path.push([m, val]); }
+    const paid = c.amount * n;
+    return { g, name: FC_NAMES[i], value: Math.round(val), paid, gain: Math.round(val - v.value - paid), rent: p.factor > 0 ? Math.round(val / 1e6 * p.factor * 100) : null, path };
+  });
+  return { now: v.value, months: n, contrib: c, scen, date: p.date };
+}
 const pensionIsins = () => [...new Set(Object.values(DB.accounts).filter(a => a.type === 'Pens').flatMap(a => ((a.pension || {}).funds || []).map(f => f.isin)).filter(i => /^[A-Z]{2}[A-Z0-9]{9}\d$/.test(i || '')))];
 /* Beiträge aus Sammelabbuchungen: Buchungen in anderen Konten mit der Vertragsnummer im Text.
    Steht hinter der Nummer ein Betrag (z. B. „12.00038894 51,06 21.90634859 17,22“), gehört nur dieser Teil zum Vertrag. */
@@ -1004,6 +1038,8 @@ function acctInfo(a) {
       + (p.amount ? ` · ${p.kind === 'monthly' ? money(p.amount) + ' im Monat' : 'erwartet ' + money(p.amount)}` : ''));
     const v = pensionValue(a);
     if (v) parts.push(`Fondsguthaben ${money(v.value)}${v.date ? (v.live ? ' (Kurs vom ' : ' (Stand ') + dDE(v.date) + ')' : ''}`);
+    const fc = pensionForecast(a);
+    if (fc) parts.push(`Prognose ${dDE(fc.date)}: ≈ ${money(fc.scen[1].value).replace(/,\d\d\s?€/, ' €')} bei ${fc.scen[1].g.toLocaleString('de-DE')} %${fc.scen[1].rent ? `, Rente ≈ ${money(fc.scen[1].rent)} im Monat` : ''}`);
   }
   return parts.join(' · ');
 }
@@ -1032,6 +1068,9 @@ function allCategories() {
 }
 
 /* ---------- Zustand der Oberfläche ---------- */
+/* Ausgeblendete Reihen im Monatsdiagramm der Übersicht (pro Browser) */
+const CHART_HIDE_KEY = 'kontor-monat-aus';
+const chartHidden = (() => { try { return new Set(JSON.parse(localStorage.getItem(CHART_HIDE_KEY)) || []); } catch (e) { return new Set(); } })();
 const UI = { ovGroup: (() => { try { return localStorage.getItem('kontor-ovgroup') || 'type'; } catch (err) { return 'type'; } })(), sel: new Set(), lastSel: null, coPer: (() => { try { return localStorage.getItem('fm-coper') || 'month'; } catch (err) { return 'month'; } })(), year: null, f: { acct: '', month: '', cat: '', tag: '', q: '' }, limit: 150, pending: null, open: {}, catTab: 'report', catQ: '', sim: {},
   exp: { kind: 'tx', year: '', acct: '', format: 'de', splits: false, inactive: true } };
 const NOFILTER = () => ({ acct: '', month: '', cat: '', tag: '', q: '' });
@@ -1060,7 +1099,7 @@ function openTx(id, preset) {
 function openAcct(name) {
   const a = name ? DB.accounts[name] : null;
   ED = { mode: 'acct', orig: name || null, name: a ? a.name : '', type: a ? a.type : 'Bank', institute: a ? a.institute : '', opening: a ? a.opening : 0,
-    rates: (a && a.rates || []).map(r => ({ from: r.from, rate: r.rate })), pension: Object.assign({ date: '', kind: 'once', amount: 0, contract: '' }, a && a.pension, { funds: ((a && a.pension && a.pension.funds) || []).map(f => Object.assign({}, f)) }) };
+    rates: (a && a.rates || []).map(r => ({ from: r.from, rate: r.rate })), pension: Object.assign({ date: '', kind: 'once', amount: 0, contract: '', growth: FC_DEFAULT.slice(), contrib: '', factor: '' }, a && a.pension, { funds: ((a && a.pension && a.pension.funds) || []).map(f => Object.assign({}, f)) }) };
   showDialog();
 }
 function showDialog() {
@@ -1263,7 +1302,7 @@ function acctExtras(e) {
         <label class="field"><span>${p.kind === 'monthly' ? 'Rente im Monat in €' : 'Erwarteter Betrag in €'}</span><input type="text" id="pe-amount" inputmode="decimal" value="${p.amount ? amtDE(p.amount) : ''}" placeholder="optional"></label>
       </div>
       <p class="muted">${p.date ? (p.date > TODAY ? `Auszahlung ${untilText(p.date)}.` : 'Der Termin ist erreicht.') : 'Der Termin erscheint in der Übersicht und unter Konten & Daten.'}</p></div>
-    ${pensionFundsForm(e)}${pensionPayForm(e)}`;
+    ${pensionFundsForm(e)}${pensionPayForm(e)}${pensionForecastForm(e)}`;
   }
   return '';
 }
@@ -1281,6 +1320,44 @@ function pensionFundsForm(e) {
       <td><input type="date" id="pf-date-${i}" value="${esc(f.date || '')}" aria-label="Stand, Zeile ${i + 1}"></td>
       <td><button type="button" class="icon" data-ed="rmfund" data-i="${i}" aria-label="Zeile entfernen">✕</button></td></tr>`).join('')}</tbody></table></div>` : ''}
     <div><button type="button" data-ed="addfund">+ Fonds hinzufügen</button></div></div>`;
+}
+/* Prognose: Annahmen und Ergebnis mit kleinem Diagramm */
+function pensionForecastForm(e) {
+  const p = e.pension, a = e.orig && DB.accounts[e.orig];
+  const num = x => x === '' || x == null || isNaN(x) ? '' : String(x).replace('.', ',');
+  const g = p.growth && p.growth.length === 3 ? p.growth : FC_DEFAULT;
+  // mit den Werten im Dialog rechnen, auch wenn noch nicht gespeichert
+  const tmp = a ? Object.assign({}, a, { pension: Object.assign({}, a.pension, { date: p.date, growth: g.map(x => isNaN(x) || x === '' ? 0 : +x), contrib: p.contrib === '' || isNaN(p.contrib) ? '' : p.contrib, factor: isNaN(p.factor) ? '' : p.factor,
+    funds: p.funds.filter(f => f.units > 0 && !isNaN(f.units)) }) }) : null;
+  const fc = tmp && pensionForecast(tmp), auto = tmp ? pensionContrib(Object.assign({}, tmp, { pension: Object.assign({}, tmp.pension, { contrib: '' }) })) : { amount: 0 };
+  const inputs = `<div class="form" style="padding-top:0">
+      ${g.map((x, i) => `<label class="field"><span>Wertentwicklung ${FC_NAMES[i]} (% pro Jahr)</span><input type="text" id="fc-g${i}" inputmode="decimal" value="${num(x)}"></label>`).join('')}
+      <label class="field"><span>Beitrag im Monat in €</span><input type="text" id="fc-contrib" inputmode="decimal" value="${p.contrib === '' || p.contrib == null ? '' : amtDE(p.contrib)}" placeholder="${auto.amount ? amtDE(auto.amount) + ' (aus den Beiträgen)' : 'z. B. 51,06'}"></label>
+      <label class="field"><span>Rentenfaktor in € je 10.000 € (optional)</span><input type="text" id="fc-factor" inputmode="decimal" value="${num(p.factor)}" placeholder="aus dem Versicherungsschein"></label>
+    </div>`;
+  let out;
+  if (!fc) out = `<p class="muted">${!p.date ? 'Trage oben den Auszahlungstermin ein.' : p.date <= TODAY ? 'Der Auszahlungstermin ist erreicht.' : !e.orig ? 'Speichere das Konto zuerst.' : 'Trage oben das Fondsguthaben ein, dann rechnet Kontor die Prognose.'}</p>`;
+  else out = `<p class="muted">Heute ${money(fc.now)}, dazu ${fc.months} Beiträge à ${money(fc.contrib.amount)}${fc.contrib.manual ? '' : ' (Durchschnitt der letzten 12 Monate)'} bis ${dDE(fc.date)}. Die Wertentwicklung versteht sich nach Kosten und ist nicht garantiert.</p>
+    <div class="table-wrap"><table><thead><tr><th>Annahme</th><th class="r">Guthaben am ${dDE(fc.date)}</th><th class="r">eingezahlt ab heute</th><th class="r">Wertzuwachs</th>${fc.scen.some(x => x.rent) ? '<th class="r">Monatsrente</th>' : ''}</tr></thead><tbody>
+    ${fc.scen.map(x => `<tr><td>${x.name}, ${x.g.toLocaleString('de-DE')} %</td><td class="r num"><b>${money(x.value)}</b></td><td class="r num">${money(x.paid)}</td><td class="r num ${moneyCls(x.gain)}">${money(x.gain)}</td>${fc.scen.some(y => y.rent) ? `<td class="r num">${x.rent ? money(x.rent) : '–'}</td>` : ''}</tr>`).join('')}
+    </tbody></table></div>${forecastChart(fc)}`;
+  return `<div class="splits"><h3>Prognose zum Auszahlungstag</h3>${inputs}${out}</div>`;
+}
+function forecastChart(fc) {
+  const W = 640, H = 170, L = 70, R = 110, T = 12, B = 24, n = Math.max(1, fc.months);
+  const max = Math.max(...fc.scen.flatMap(x => x.path.map(q => q[1]))), min = Math.min(fc.now, ...fc.scen.flatMap(x => x.path.map(q => q[1])));
+  // Achse eng um die Werte, damit die Unterschiede sichtbar werden
+  const step = niceStep(Math.max(1, max - min) / 4) || 1, lo = Math.max(0, Math.floor(min / step) * step), hi = Math.ceil(max / step) * step;
+  const x = m => L + (W - L - R) * m / n, y = v => T + (H - T - B) * (1 - (v - lo) / Math.max(1, hi - lo));
+  let g = ''; for (let v = lo; v <= hi + 1; v += step) g += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${EUR.format(v / 100).replace(/,00\s?€/, ' €')}</text>`;
+  const y0 = +TODAY.slice(0, 4), y1 = +fc.date.slice(0, 4);
+  for (let yr = y0 + 1; yr <= y1; yr++) { const m = monthsUntil(`${yr}-01-01`); if (m > 0 && m < n) g += `<text x="${x(m)}" y="${H - 6}" text-anchor="middle">${yr}</text>`; }
+  // Beschriftungen am Ende mit mindestens 13 px Abstand, von unten nach oben
+  const ly = fc.scen.map(s => y(s.value) + 4);
+  for (let i = ly.length - 2; i >= 0; i--) if (ly[i] - ly[i + 1] < 13) ly[i] = ly[i + 1] + 13;
+  const lines = fc.scen.map((s, i) => `<polyline class="fc s${i}" points="${s.path.map(([m, v]) => `${x(m).toFixed(1)},${y(v).toFixed(1)}`).join(' ')}"><title>${s.name}, ${s.g} %: ${money(s.value)}</title></polyline>
+    <text class="fc-lbl s${i}" x="${W - R + 6}" y="${ly[i].toFixed(1)}">${s.name} ${money(s.value).replace(/,\d\d\s?€/, ' €')}</text>`).join('');
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px" role="img" aria-label="Prognose des Fondsguthabens bis zum Auszahlungstag">${g}${lines}</svg>`;
 }
 /* Beiträge: Vertragsnummer und Umbuchung der passenden Abbuchungen */
 function pensionPayForm(e) {
@@ -1315,6 +1392,10 @@ function readAcct() {
     e.pension.date = v('pe-date'); e.pension.kind = v('pe-kind');
     try { e.pension.amount = Math.abs(QIF.amount(v('pe-amount') || '0')); } catch (err) { e.pension.amount = NaN; }
     if (v('pe-contract') !== undefined) e.pension.contract = v('pe-contract').trim();
+    const dn = x => { let t = String(x || '').replace('%', '').trim(); if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.'); return t === '' ? '' : +t; };
+    if (v('fc-g0') !== undefined) e.pension.growth = [0, 1, 2].map(i => dn(v('fc-g' + i)));
+    if (v('fc-contrib') !== undefined) { const c = v('fc-contrib').trim(); try { e.pension.contrib = c ? Math.abs(QIF.amount(c)) : ''; } catch (err) { e.pension.contrib = NaN; } }
+    if (v('fc-factor') !== undefined) e.pension.factor = dn(v('fc-factor'));
     const dec = x => { let t = String(x || '').trim(); if (t.includes(',')) t = t.replace(/\./g, '').replace(',', '.'); return t === '' ? '' : +t; };
     e.pension.funds = e.pension.funds.map((f, i) => v('pf-name-' + i) === undefined ? f : {
       name: v('pf-name-' + i).trim(), isin: v('pf-isin-' + i).replace(/\s/g, '').toUpperCase(), units: dec(v('pf-units-' + i)), price: dec(v('pf-price-' + i)), date: v('pf-date-' + i) });
@@ -1336,7 +1417,11 @@ function saveAcct() {
     const fs = e.pension.funds.filter(f => f.name || f.isin || f.units !== '' || f.price !== '');
     if (fs.some(f => f.units === '' || isNaN(f.units) || f.units < 0 || (f.price !== '' && (isNaN(f.price) || f.price < 0)))) return toast('Bitte bei jedem Fonds die Anteile als Zahl eintragen, z. B. 110,3282.');
     if (fs.some(f => f.isin && !/^[A-Z]{2}[A-Z0-9]{9}\d$/.test(f.isin))) return toast('Eine ISIN hat 12 Zeichen, z. B. LU0309483781.');
+    const gr = e.pension.growth || FC_DEFAULT;
+    if (gr.some(x => x === '' || isNaN(x) || x < -20 || x > 30)) return toast('Bitte für die Wertentwicklung drei Prozentsätze eintragen, z. B. 2, 5 und 7.');
+    if (Number.isNaN(e.pension.contrib) || Number.isNaN(e.pension.factor) || e.pension.factor < 0) return toast('Beitrag oder Rentenfaktor nicht lesbar.');
     pension = { date: e.pension.date || '', kind: e.pension.kind, amount: e.pension.amount || 0, contract: e.pension.contract || '',
+      growth: gr.map(Number), contrib: e.pension.contrib === '' ? '' : e.pension.contrib, factor: e.pension.factor === '' ? '' : e.pension.factor,
       funds: fs.map(f => ({ name: f.name || f.isin, isin: f.isin, units: +f.units, price: f.price === '' ? 0 : +f.price, date: f.date || '' })) };
   }
   if (name !== e.orig && DB.accounts[name]) return toast('Ein Konto mit diesem Namen gibt es schon.');
@@ -3412,7 +3497,7 @@ Views.uebersicht = () => {
       })() : ''}
     </div>
     <div class="panel"><div class="row spread"><h2>Einnahmen, Ausgaben und Sparen pro Monat</h2>
-      <div class="legend"><span><i style="background:var(--pos)"></i>Einnahmen</span><span><i style="background:var(--minus)"></i>Ausgaben</span><span><i style="background:var(--c7)"></i>Gespart und getilgt</span></div></div>
+      <div class="legend">${MONTH_SERIES.map(([k, l, c]) => `<button type="button" class="lg" data-mseries="${k}" aria-pressed="${!chartHidden.has(k)}" title="${chartHidden.has(k) ? 'Einblenden' : 'Ausblenden'}"><i style="background:${c}"></i>${l}</button>`).join('')}</div></div>
       <div class="table-wrap">${monthChart(inc, out, sav.map((v, i) => v + til[i]))}</div>
       <p class="muted">Umbuchungen zwischen eigenen Konten sind nicht mitgezählt${xferN ? `, auch nicht ${xferN} ${xferN === 1 ? 'Buchung' : 'Buchungen'} mit einer Kategorie wie „Umbuchung“` : ''}.</p></div>
     <div class="panel"><h2>Ausgaben nach Kategorie ${UI.year}</h2>
@@ -3439,22 +3524,27 @@ function overviewAccounts(accts) {
   }
   return `<div class="panel"><div class="row spread"><h2>Konten</h2>${seg}</div>${hint}<div class="table-wrap"><table><tbody>${body}</tbody></table></div>`;
 }
+const MONTH_SERIES = [['in', 'Einnahmen', 'var(--pos)'], ['out', 'Ausgaben', 'var(--minus)'], ['save', 'Gespart und getilgt', 'var(--c7)']];
 function monthChart(inc, out, sav) {
   const W = 720, H = 220, L = 70, B = 24, T = 10;
   sav = sav || Array(12).fill(0);
-  const max = Math.max(1, ...inc, ...out, ...sav);
+  // Nur eingeblendete Reihen zeichnen; die Achse richtet sich nach ihnen
+  const data = { in: inc, out, save: sav.map(v => Math.max(0, v)) }, raw = { in: inc, out, save: sav };
+  const ser = MONTH_SERIES.filter(([k]) => !chartHidden.has(k));
+  const max = Math.max(1, ...ser.flatMap(([k]) => data[k]));
   const step = niceStep(max / 4), top = Math.ceil(max / step) * step;
   const y = v => T + (H - T - B) * (1 - v / top);
-  const cw = (W - L) / 12, bw = Math.min(14, cw / 4);
+  const cw = (W - L) / 12, bw = Math.min(18, cw / (ser.length + 1)), gap = 2;
   let g = '';
   for (let v = 0; v <= top + 1; v += step) g += `<line class="grid" x1="${L}" x2="${W}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${EUR.format(v / 100).replace(/,00\s?€/, ' €')}</text>`;
   let bars = '';
   for (let m = 0; m < 12; m++) {
     const x = L + m * cw + cw / 2;
-    const sv = Math.max(0, sav[m]);
-    bars += `<rect class="in" x="${x - 1.5 * bw - 2}" y="${y(inc[m])}" width="${bw}" height="${y(0) - y(inc[m])}" rx="2"><title>${MONTHS[m]} Einnahmen ${money(inc[m])}</title></rect>`;
-    bars += `<rect class="out" x="${x - bw / 2}" y="${y(out[m])}" width="${bw}" height="${y(0) - y(out[m])}" rx="2"><title>${MONTHS[m]} Ausgaben ${money(out[m])}</title></rect>`;
-    bars += `<rect class="save" x="${x + bw / 2 + 2}" y="${y(sv)}" width="${bw}" height="${y(0) - y(sv)}" rx="2"><title>${MONTHS[m]} gespart und getilgt ${money(sav[m])}</title></rect>`;
+    const x0 = x - (ser.length * bw + (ser.length - 1) * gap) / 2;
+    ser.forEach(([k, l], i) => {
+      const v = data[k][m];
+      bars += `<rect class="${k}" x="${(x0 + i * (bw + gap)).toFixed(1)}" y="${y(v)}" width="${bw}" height="${y(0) - y(v)}" rx="2"><title>${MONTHS[m]} ${l} ${money(raw[k][m])}</title></rect>`;
+    });
     bars += `<text x="${x}" y="${H - 6}" text-anchor="middle">${MONTHS[m]}</text>`;
   }
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" width="100%" style="min-width:520px" role="img" aria-label="Einnahmen und Ausgaben pro Monat">${g}${bars}</svg>`;
@@ -4595,7 +4685,7 @@ function dialogChange(t) {
   if (ED.mode === 'prefs') { if (/^pf-/.test(t.name)) { Prefs.set(t.name.slice(3), t.value); showDialog(); } return; }
   if (ED.mode === 'acct') {
     if (t.id === 'ac-inst' && t.value === '__new') { readAcct(); openInst(null, { back: Object.assign({}, ED) }); }
-    else if (t.id === 'ac-type' || t.id === 'pe-kind' || t.id === 'pe-date' || t.id === 'pe-contract' || /^(rt|pf)-/.test(t.id)) { readAcct(); showDialog(); }
+    else if (t.id === 'ac-type' || t.id === 'pe-kind' || t.id === 'pe-date' || t.id === 'pe-contract' || /^(rt|pf|fc)-/.test(t.id)) { readAcct(); showDialog(); }
     return;
   }
   if (ED.mode === 'group') return;
@@ -4745,6 +4835,11 @@ document.addEventListener('click', e => {
       nextReceipt();
     })();
     return;
+  }
+  if (t.dataset.mseries) {
+    const k = t.dataset.mseries; chartHidden.has(k) ? chartHidden.delete(k) : chartHidden.add(k);
+    try { localStorage.setItem(CHART_HIDE_KEY, JSON.stringify([...chartHidden])); } catch (e) { }
+    return render();
   }
   if (t.id === 'sel-clear') { UI.sel.clear(); return render(); }
   if (t.id === 'sel-tagadd') {

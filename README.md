@@ -1,4 +1,4 @@
-# Kontor
+﻿# Kontor
 
 Persönliche Finanzverwaltung für den eigenen Server (Unraid/Docker): Konten, Buchungen, Kategorien und Regeln,
 Verträge und Abos, Kredite, Depot mit aktuellen Kursen. Die Daten bleiben auf dem eigenen Server.
@@ -12,7 +12,7 @@ Verträge und Abos, Kredite, Depot mit aktuellen Kursen. Die Daten bleiben auf d
 - **Sparen und Tilgung** getrennt von den Ausgaben: Umbuchungen auf Spar-, Depot- und Rentenkonten zählen als Sparen, Kreditraten als Tilgung plus Zinsen
 - **Kategorien, Tags und Regeln** für die automatische Zuordnung, auch als Umbuchung auf ein Konto; Tags für viele Buchungen auf einmal per Mehrfachauswahl
 - **Kontogruppen** nach Kontoart oder selbst angelegt, mit Summen und als Buchungsfilter
-- **Sparkonten** mit Zinssatz-Verlauf und Zinshochrechnung, **Rentenkonten** mit Auszahlungstermin, Fondsguthaben und Umbuchung der Beiträge aus Sammelabbuchungen
+- **Sparkonten** mit Zinssatz-Verlauf und Zinshochrechnung, **Rentenkonten** mit Auszahlungstermin, Prognose zum Auszahlungstag, Fondsguthaben und Umbuchung der Beiträge aus Sammelabbuchungen
 - **Geldfluss** als Sankey-Diagramm: Einnahmen → Konten → Ausgaben
 - **Übersicht** mit Einnahmen/Ausgaben pro Monat und Ausgaben nach Kategorie
 - **Einstellungen** für Schriftgröße, Hell/Dunkel und Farbschema (pro Browser)
