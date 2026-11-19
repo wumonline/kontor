@@ -523,7 +523,8 @@ const KNOWN_INST = [
   { key: 'volksbank', name: 'Volksbank', match: /volksbank|raiffeisen|\bvb\b/i, color: '#0066B3', fg: '#ffffff' },
   { key: 'dkb', name: 'DKB', match: /\bdkb\b/i, color: '#148DEA', fg: '#ffffff' },
   { key: 'comdirect', name: 'comdirect', match: /comdirect/i, color: '#FFF500', fg: '#1a1a1a' },
-  { key: 'traderepublic', name: 'Trade Republic', match: /trade ?republic/i, color: '#111111', fg: '#ffffff' }
+  { key: 'traderepublic', name: 'Trade Republic', match: /trade ?republic/i, color: '#111111', fg: '#ffffff' },
+  { key: 'paypal', name: 'PayPal', match: /paypal/i, color: '#003087', fg: '#ffffff' }
 ];
 function newInstitute(id, name, extra) {
   return Object.assign({ id, name, blz: '', bic: '', color: '#5b6b74', fg: '#ffffff', logo: '',
@@ -1133,7 +1134,7 @@ function showDialog() {
   if (!d.open) d.showModal();
   placeToast();
   const first = d.querySelector('[autofocus]'); if (first) first.focus();
-  updateRest(); updateRulePreview(); updateContractPreview(); updateLoanPreview();
+  updateRest(); updateRulePreview(); updateContractPreview(); updateLoanPreview(); markLoanMissing();
 }
 function closeDialog() { Fints.stop(); const d = $('#dlg'); if (d.open) d.close(); ED = null; }
 
@@ -1946,13 +1947,28 @@ function saveContract() {
 /* Dialog für einen Kredit */
 function openLoan(id, preset) {
   const l = id ? DB.loans.find(x => x.id === id) : newLoan(preset);
-  ED = Object.assign({ mode: 'loan', isNew: !id, years: '' }, JSON.parse(JSON.stringify(l)));
+  ED = Object.assign({ mode: 'loan', isNew: !id, years: '', origAcct: id ? l.acct || '' : '', tried: false }, JSON.parse(JSON.stringify(l)));
   showDialog();
+}
+/* Fehlende oder unlesbare Pflichtangaben im Kreditdialog: [Feld-ID, Bezeichnung] */
+function loanMissing(e) {
+  const m = [], ann = e.kind !== 'private';
+  if (!e.name) m.push(['lo-name', 'Name']);
+  if (Number.isNaN(e.principal)) m.push(['lo-principal', 'Kreditbetrag (nicht lesbar)']); else if (!(e.principal > 0)) m.push(['lo-principal', 'Kreditbetrag']);
+  if (!e.start || !/^\d{4}-\d{2}-\d{2}$/.test(e.start)) m.push(['lo-start', 'Auszahlung am']);
+  if (ann && Number.isNaN(e.payment)) m.push(['lo-payment', 'Rate (nicht lesbar)']); else if (ann && !(e.payment > 0)) m.push(['lo-payment', 'Rate (oder Laufzeit eintragen und „Rate berechnen“)']);
+  if (ann && Number.isNaN(e.balance)) m.push(['lo-balance', 'Restschuld (nicht lesbar)']);
+  if (ann && e.balance != null && !Number.isNaN(e.balance) && !e.balanceDate) m.push(['lo-baldate', 'Stand am (Datum zur Restschuld)']);
+  if (ann && e.fixedUntil && !/^\d{4}-\d{2}-\d{2}$/.test(e.fixedUntil)) m.push(['lo-fixed', 'Zinsbindung bis (kein gültiges Datum)']);
+  (e.extras || []).forEach((x, i) => { if (Number.isNaN(x.amount)) m.push(['lx-amt-' + i, `Betrag in Zeile ${i + 1} (nicht lesbar)`]); });
+  return m;
 }
 function loanForm() {
   const e = ED, ann = e.kind !== 'private', opt = (o, cur) => Object.entries(o).map(([k, l]) => `<option value="${k}" ${k === cur ? 'selected' : ''}>${l}</option>`).join('');
+  const miss = e.tried ? loanMissing(e) : [];
   return `<form id="ed-form" class="ed" novalidate>
     <div class="row spread"><h2>${e.isNew ? 'Neuer Kredit' : 'Kredit bearbeiten'}</h2><button type="button" class="icon" data-ed="close" aria-label="Schließen">✕</button></div>
+    ${miss.length ? `<p class="missing-note" role="alert">Zum Speichern fehlt noch: ${esc(miss.map(x => x[1]).join(', '))}. Die Felder sind rot markiert.</p>` : ''}
     <div class="form">
       <label class="field"><span>Name</span><input type="text" id="lo-name" value="${esc(e.name)}" placeholder="z. B. Baufinanzierung Haus" autofocus></label>
       <label class="field"><span>Art</span><select id="lo-kind">${opt({ annuity: 'Kredit mit fester Rate', private: 'Privat, ohne festen Plan' }, e.kind)}</select></label>
@@ -1987,6 +2003,12 @@ function loanForm() {
       <div class="row"><button type="button" data-ed="close">Abbrechen</button><button type="submit" class="primary">Speichern</button></div>
     </div>
   </form>`;
+}
+function markLoanMissing() {
+  if (!ED || ED.mode !== 'loan' || !ED.tried) return;
+  const miss = loanMissing(ED);
+  for (const [id] of miss) { const el = $('#' + id); if (el) el.setAttribute('aria-invalid', 'true'); }
+  return miss;
 }
 function readLoan() {
   const e = ED, v = id => { const el = $('#' + id); return el ? el.value : undefined; };
@@ -2024,19 +2046,20 @@ function updateLoanPreview() {
 function saveLoan() {
   readLoan();
   const e = ED;
-  if (!e.name) return toast('Bitte einen Namen eingeben.');
-  if (!(e.principal > 0)) return toast('Bitte den Kreditbetrag eingeben.');
-  if (!e.start) return toast('Bitte das Datum der Auszahlung eingeben.');
-  if (e.kind !== 'private' && !(e.payment > 0)) return toast('Bitte die Rate eingeben oder aus der Laufzeit berechnen.');
-  if ([e.payment, e.balance, ...e.extras.map(x => x.amount)].some(x => Number.isNaN(x))) return toast('Ein Betrag ist nicht lesbar.');
-  if (e.balance != null && !e.balanceDate) return toast('Zur Restschuld laut Bank fehlt das Datum.');
+  const miss = loanMissing(e);
+  if (miss.length) {
+    e.tried = true; showDialog();
+    const first = $('#' + miss[0][0]); if (first) first.focus();
+    return toast(`Noch nicht gespeichert. Es fehlt: ${miss.map(x => x[1]).join(', ')}.`, null, 9000);
+  }
   const l = {}; for (const k of Object.keys(newLoan())) l[k] = e[k];
   l.extras = e.extras.filter(x => x.date && x.amount > 0).sort((a, b) => a.date.localeCompare(b.date));
   const other = l.acct && DB.loans.find(x => x.acct === l.acct && x.id !== l.id);
   if (other) return toast(`Das Konto „${l.acct}“ ist schon mit „${other.name}“ verknüpft.`);
   const i = DB.loans.findIndex(x => x.id === l.id);
   if (i >= 0) DB.loans[i] = l; else DB.loans.push(l);
-  save(); closeDialog(); render(); toast(`„${l.name}“ gespeichert.${l.acct ? ` Das Konto „${l.acct}“ steht jetzt unter Kredite & Schulden.` : ''}`);
+  const moved = l.acct && l.acct !== e.origAcct;
+  save(); closeDialog(); render(); toast(`„${l.name}“ gespeichert.${moved ? ` Das Konto „${l.acct}“ steht jetzt unter Kredite & Schulden.` : ''}`);
 }
 
 /* Neu scannen: Vorschläge neu berechnen und merken, was seit dem letzten Scan dazugekommen ist. */
@@ -2476,6 +2499,7 @@ function csvState(name, buf, size) {
   st.newName = st.meta.name || name.replace(/\.[^.]+$/, '');
   if (/kredit|darlehen/i.test(st.meta.name)) st.newType = 'Oth L';
   if (isTRHead(rows[0])) { st.headerIdx = 0; trInit(st); return st; }
+  if (ppInit(st)) return st;
   if (holdingsState(st)) return st;
   st.suggestion = suggestCsvAcct(st) || acctFromFileName(name);
   if (st.suggestion) st.acct = st.suggestion.acct;
@@ -2658,13 +2682,14 @@ async function commitCSV(stArg, opts = {}) {
   }
   const merged = dedupeTransfers(DB);
   const ruled = applyRules(added.filter(n => !n.transfer)).length;
+  const ppLinked = ppRelink();
   if (st.fixOpen && st.balDiff && !DB.accounts[st.acct].locked) DB.accounts[st.acct].opening = (DB.accounts[st.acct].opening || 0) + st.balDiff;
   DB.tx.sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
   DB.csvMaps = DB.csvMaps || {}; DB.csvMaps[(st.rows[st.headerIdx] || []).join('|')] = { map: st.map };
   DB.imports.push({ id: impId, file: st.file, date: new Date().toISOString(), count: added.length });
   await archiveImported(st, st.acct);
   const acct = st.acct; if (UI.csv === st) UI.csv = null; save();
-  const msg = `${added.length} Buchungen in „${acct}“ importiert${removedN ? `, ${removedN} alte ersetzt` : ''}${relinked ? `, ${relinked} Umbuchungen zugeordnet` : ''}${upgraded + merged ? `, ${upgraded + merged} Umbuchungen mit vorhandenen Gegenbuchungen abgeglichen` : ''}${ruled ? `, ${ruled} per Regel zugeordnet` : ''}.`;
+  const msg = `${added.length} Buchungen in „${acct}“ importiert${removedN ? `, ${removedN} alte ersetzt` : ''}${relinked ? `, ${relinked} Umbuchungen zugeordnet` : ''}${upgraded + merged ? `, ${upgraded + merged} Umbuchungen mit vorhandenen Gegenbuchungen abgeglichen` : ''}${ruled ? `, ${ruled} per Regel zugeordnet` : ''}${ppLinked ? `, ${ppLinked} PayPal-Zahlungen verknüpft` : ''}.`;
   if (opts.auto) return msg;
   if (nextCsv()) { toast(msg + ' Weiter mit der nächsten Datei.', null, 9000); return; }
   UI.f = Object.assign(NOFILTER(), { acct }); location.hash = 'buchungen'; render();
@@ -2811,6 +2836,170 @@ async function commitHold(stArg, opts = {}) {
   const msg = `Depotbestand „${acct}“ vom ${dDE(h.date)}: ${nNew} Positionen eingebucht${nFix ? `, ${nFix} Stückzahlen angeglichen` : ''}, ${plan.length - nNew - nFix} unverändert.`;
   if (opts.auto) return msg;
   location.hash = 'depot'; render(); toast(msg, null, 9000);
+}
+
+/* ---------- PayPal ----------
+   CSV aus PayPal (Aktivitäten → Berichte → Aktivitäten herunterladen, oder Kontoauszug als CSV). Erkannt an Transaktionscode, Brutto/Netto und Währung.
+   PayPal wird ein eigenes Konto: Zahlungen stehen dort mit Händler und Artikel. Aufladungen vom Bankkonto (Lastschrift) und Auszahlungen
+   werden mit der passenden PayPal-Buchung im Bankkonto zur Umbuchung verknüpft; die Bankbuchung bekommt den Händler in den Verwendungszweck.
+   Fehlt die Bankbuchung noch, wird sie nach dem nächsten Import des Bankkontos nachträglich verknüpft (ppRelink). */
+const PP_COL = { date: /^(datum|date)$/i, time: /^(uhrzeit|time)$/i, name: /^name$/i, type: /^(typ|beschreibung|type|description)$/i, status: /^status$/i,
+  cur: /^(währung|currency)$/i, gross: /^(brutto|gross)$/i, net: /^(netto|net)$/i, code: /^(transaktionscode|transaction id)$/i,
+  ref: /^(zugehöriger transaktionscode|reference txn id)$/i, item: /^(artikelbezeichnung|item title)$/i, subject: /^(betreff|subject)$/i,
+  note: /^(hinweis|note)$/i, bal: /^(guthaben|balance)$/i, impact: /^(auswirkung auf guthaben|balance impact)$/i, inv: /^(rechnungsnummer|invoice number)$/i };
+function ppCols(head) { const c = {}; for (const [k, re] of Object.entries(PP_COL)) c[k] = head.findIndex(h => re.test(String(h || '').trim())); return c; }
+const isPPHead = head => { const c = ppCols(head || []); return c.date >= 0 && c.cur >= 0 && c.net >= 0 && c.code >= 0 && (c.gross >= 0 || c.type >= 0); };
+const PP_FUND = /bankgutschrift|bank deposit|einzahlung|vom bankkonto|abbuchung.*bankkonto|lastschrift/i;
+const PP_OUT = /abbuchung|auszahlung|withdraw|transfer to bank|überweisung auf (das )?bankkonto/i;
+const PP_FX = /währungsumrechnung|currency conversion/i;
+const isPPAcct = a => !!a && (/paypal/i.test(a.name) || a.institute === 'paypal');
+function ppInit(st) {
+  let hi = -1;
+  for (let i = 0; i < Math.min(5, st.rows.length); i++) if (isPPHead(st.rows[i])) { hi = i; break; }
+  if (hi < 0) return false;
+  st.headerIdx = hi;
+  const acc = Object.values(DB.accounts).find(isPPAcct);
+  st.pp = { acct: acc ? acc.name : '__new', newName: 'PayPal' };
+  return true;
+}
+/* Zeilen der Datei: nur abgeschlossene Euro-Buchungen, die das Guthaben ändern */
+function ppRows(st) {
+  const c = ppCols(st.rows[st.headerIdx]), get = (r, k) => c[k] >= 0 ? String(r[c[k]] || '').replace(/\s+/g, ' ').trim() : '';
+  const all = [], errors = [];
+  st.rows.slice(st.headerIdx + 1).forEach((r, k) => {
+    const date = parseDateAny(get(r, 'date')); if (!date) return;
+    let net; try { net = csvAmount(get(r, 'net') || get(r, 'gross')); } catch (e) { errors.push(`Zeile ${st.headerIdx + k + 2}: Betrag nicht lesbar`); return; }
+    all.push({ date, time: get(r, 'time'), name: get(r, 'name'), type: get(r, 'type'), status: get(r, 'status'), cur: get(r, 'cur').toUpperCase() || 'EUR',
+      net, code: get(r, 'code'), ref: get(r, 'ref'), item: get(r, 'item'), subject: get(r, 'subject'), note: get(r, 'note'), inv: get(r, 'inv'),
+      bal: get(r, 'bal'), impact: get(r, 'impact'), line: st.headerIdx + k + 2 });
+  });
+  const ok = x => (!x.status || /abgeschlossen|completed|erledigt/i.test(x.status)) && !/^memo$/i.test(x.impact) && !/autori[sz]ierung|authori[sz]ation/i.test(x.type) && x.net !== 0;
+  return { all, rows: all.filter(x => ok(x) && x.cur === 'EUR'), errors };
+}
+/* Händler zu einer Zeile ohne Namen: Fremdwährungszahlung zur Umrechnung, Zahlung zur Aufladung */
+function ppMerchant(x, all) {
+  if (x.name) return x.name;
+  const byCode = x.ref && all.find(y => y.code === x.ref && y.name);
+  if (byCode) return byCode.name;
+  const same = all.filter(y => y !== x && y.date === x.date && y.time === x.time && y.name && !PP_FX.test(y.type));
+  return same.length ? same[0].name : '';
+}
+function ppPlan(st) {
+  const { all, rows, errors } = ppRows(st), out = [];
+  for (const x of rows) {
+    const fx = PP_FX.test(x.type), fund = x.net > 0 && PP_FUND.test(x.type), wd = x.net < 0 && !fx && PP_OUT.test(x.type) && !x.name;
+    const merchant = ppMerchant(x, all);
+    let payee = merchant || x.type || 'PayPal', memo;
+    if (fx) {
+      const f = all.find(y => y.date === x.date && y.time === x.time && y.cur !== 'EUR' && !PP_FX.test(y.type) && y.name);
+      memo = [f ? `Bezahlt in ${f.cur} ${String(Math.abs(f.net / 100).toFixed(2)).replace('.', ',')}` : 'Währungsumrechnung', f && f.item].filter(Boolean).join(' · ');
+    } else memo = [x.type, x.item, x.subject, x.note, x.inv ? 'Rechnung ' + x.inv : ''].filter(Boolean).join(' · ');
+    if (fund) { payee = 'PayPal-Aufladung'; memo = `Vom Bankkonto${merchant ? ` für ${merchant}` : ''}${x.type ? ' · ' + x.type : ''}`; }
+    if (wd) { payee = 'PayPal-Auszahlung'; memo = 'Auf das Bankkonto' + (x.type ? ' · ' + x.type : ''); }
+    out.push({ key: 'pp|' + (x.code || [x.date, x.time, x.net, x.type].join('|')), date: x.date, time: x.time, amount: x.net, payee, memo,
+      kind: fund ? 'fund' : wd ? 'out' : 'pay', merchant, bal: x.bal });
+  }
+  out.sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+  // Guthaben vor der ersten Buchung, falls die Datei es nennt
+  let start = null;
+  const first = out.find(t => t.bal);
+  if (first) { try { start = csvAmount(first.bal) - first.amount; } catch (e) { } }
+  return { tx: out, errors, start, skipped: all.length - rows.length };
+}
+/* Passende PayPal-Buchung im Bankkonto: Betrag umgekehrt, höchstens 6 Tage später (oder 1 Tag früher), „PayPal“ im Text, noch nicht verknüpft */
+function ppBankMatch(t, ppAcct, used) {
+  let best = null, bd = 99;
+  for (const x of DB.tx) {
+    if (x.acct === ppAcct || used.has(x.id) || x.link || x.gen || x.amount !== -t.amount || (x.splits && x.splits.length)) continue;
+    if (x.transfer && x.transfer !== ppAcct) continue;
+    if (isPPAcct(DB.accounts[x.acct])) continue;
+    if (!/paypal/i.test(`${x.payee || ''} ${x.payeeOrig || ''} ${x.memo || ''}`)) continue;
+    const d = daysBetween(t.date, x.date); if (d < -1 || d > 6) continue;
+    const k = Math.abs(d); if (k < bd) { best = x; bd = k; }
+  }
+  return best;
+}
+function ppLink(n, o) {
+  // Kategorie der Bankbuchung geht auf die zugehörige Zahlung im PayPal-Konto über, wenn die noch keine hat
+  const buy = DB.tx.find(x => x.acct === n.acct && x.pp === 'pay' && x.amount === -n.amount && !x.category && !x.transfer && Math.abs(daysBetween(x.date, n.date)) <= 1);
+  if (buy && o.category && !o.transfer) { buy.category = o.category; if (o.cls) buy.cls = o.cls; }
+  n.transfer = o.acct; n.category = ''; n.link = o.id;
+  o.transfer = n.acct; o.category = ''; delete o.byRule; o.link = n.id;
+  const m = (n.memo || '').match(/ für (.+?)( · |$)/);
+  if (m && !(o.memo || '').toLowerCase().includes(m[1].toLowerCase()) && !(o.memo || '').startsWith('PayPal: ')) o.memo = `PayPal: ${m[1]}${o.memo ? ' · ' + o.memo : ''}`;
+}
+/* Offene Aufladungen und Auszahlungen nachträglich mit Bankbuchungen verknüpfen (nach jedem Import) */
+function ppRelink() {
+  const used = new Set(); let n = 0;
+  for (const t of DB.tx) {
+    if (!t.pp || t.pp === 'pay' || t.link || t.transfer) continue;
+    const o = ppBankMatch(t, t.acct, used); if (!o) continue;
+    used.add(o.id); ppLink(t, o); n++;
+  }
+  return n;
+}
+function ppPanel() {
+  const st = UI.csv, o = st.pp, plan = ppPlan(st);
+  const target = o.acct === '__new' ? '' : o.acct, keys = new Set(DB.tx.map(t => t.key));
+  const fresh = plan.tx.filter(t => !keys.has(t.key)), skip = plan.tx.length - fresh.length;
+  const used = new Set(), xfer = fresh.filter(t => t.kind !== 'pay');
+  const matched = xfer.filter(t => { const m = ppBankMatch(t, target || '\u0001', used); if (m) used.add(m.id); return !!m; }).length;
+  const dates = plan.tx.map(t => t.date);
+  const accts = Object.values(DB.accounts).filter(a => !loanOfAcct(a.name)).sort((a, b) => a.name.localeCompare(b.name, 'de'));
+  const show = fresh.slice(-12).reverse();
+  const kindChip = t => t.kind === 'fund' ? '<span class="chip tin">← Bankkonto</span>' : t.kind === 'out' ? '<span class="chip tout">→ Bankkonto</span>' : '';
+  return `<div class="panel csvflow">
+    <div class="row spread"><h2>PayPal importieren</h2><span class="chip ok">Format erkannt</span></div>
+    <section class="step-box"><h3 class="step">1 · Datei eingelesen</h3>
+      <dl class="facts">${[['Datei', esc(st.file)], ['Zeitraum', dates.length ? `${dDE(dates[0])} – ${dDE(dates[dates.length - 1])}` : '–'], ['Buchungen in Euro', plan.tx.length],
+        ['Davon Aufladungen/Auszahlungen', plan.tx.filter(t => t.kind !== 'pay').length], ['Übersprungen', `${plan.skipped} (offen, storniert, nur vorgemerkt oder Fremdwährung)`]].map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>
+      <p class="muted">Zahlungen stehen im PayPal-Konto mit Händler und Artikel. Aufladungen vom Bankkonto und Auszahlungen dorthin werden mit der PayPal-Abbuchung im Bankkonto zur Umbuchung verknüpft; dort steht dann „PayPal: Händler“ im Verwendungszweck. Bei Zahlungen in Fremdwährung zählt der umgerechnete Euro-Betrag.</p>
+      ${plan.errors.length ? `<details><summary class="neg">${plan.errors.length} Zeilen nicht lesbar</summary><ul>${plan.errors.slice(0, 20).map(x => `<li>${esc(x)}</li>`).join('')}</ul></details>` : ''}
+    </section>
+    <section class="step-box"><h3 class="step">2 · Konto</h3>
+      <div class="form"><label class="field"><span>PayPal-Konto in der App</span><select id="pp-acct">${accts.map(a => `<option value="${esc(a.name)}" ${a.name === o.acct ? 'selected' : ''}>${esc(a.name)} · ${esc(acctType(a.type))}</option>`).join('')}<option value="__new" ${o.acct === '__new' ? 'selected' : ''}>＋ Neues Konto anlegen</option></select></label>
+      ${o.acct === '__new' ? `<label class="field"><span>Name des neuen Kontos</span><input type="text" id="pp-name" value="${esc(o.newName)}"></label>` : ''}</div>
+      ${o.acct === '__new' && plan.start ? `<p class="muted">Anfangssaldo laut Datei: ${money(plan.start)}.</p>` : ''}
+    </section>
+    <section class="step-box"><h3 class="step">3 · Prüfen und importieren</h3>
+      <p><b>${fresh.length}</b> neue Buchungen, Summe ${money(fresh.reduce((x, t) => x + t.amount, 0))}.${skip ? ` ${skip} sind schon importiert und werden übersprungen.` : ''}</p>
+      ${xfer.length ? `<p>${matched} von ${xfer.length} Aufladungen/Auszahlungen haben ihr Gegenstück im Bankkonto.${xfer.length > matched ? ' Die übrigen werden verknüpft, sobald du die Umsätze des Bankkontos importierst.' : ''}</p>` : ''}
+      <div class="table-wrap"><table><thead><tr><th>Datum</th><th>Empfänger</th><th></th><th class="r">Betrag</th></tr></thead><tbody>
+        ${show.map(t => `<tr><td class="num">${dDE(t.date)}</td><td>${esc(t.payee)}<span class="sub clip" title="${esc(t.memo)}">${esc(t.memo)}</span></td><td>${kindChip(t)}</td><td class="r num ${moneyCls(t.amount)}">${money(t.amount)}</td></tr>`).join('')}
+      </tbody></table></div>
+      ${fresh.length > 12 ? `<p class="muted">Die neuesten 12 von ${fresh.length}.</p>` : ''}
+      <label class="row"><input type="checkbox" id="csv-archive" ${st.archive !== false ? 'checked' : ''}> <span>Datei beim PayPal-Konto bei den Kontoauszügen ablegen</span></label>
+      <div class="row"><button class="primary" id="pp-go" ${fresh.length ? '' : 'disabled'}>${fresh.length} Buchungen importieren</button><button id="csv-cancel">Abbrechen</button></div>
+    </section></div>`;
+}
+async function commitPP(stArg, opts = {}) {
+  const st = stArg || UI.csv, o = st && st.pp; if (!o) return;
+  const plan = ppPlan(st);
+  let acct = o.acct;
+  if (acct === '__new') {
+    const name = (o.newName || '').trim(); if (!name) return toast('Bitte einen Namen für das PayPal-Konto eingeben.');
+    if (DB.accounts[name]) return toast(`Ein Konto „${name}“ gibt es schon. Wähle es oben aus.`);
+    DB.accounts[name] = { name, type: 'Bank', opening: plan.start || 0, desc: 'PayPal', iban: '', number: '', inactive: false };
+    ensureInstitutes(DB); acct = name;
+  }
+  const keys = new Set(DB.tx.map(t => t.key)), impId = 'i' + Date.now(), added = [], used = new Set();
+  let linked = 0;
+  for (const t of plan.tx) {
+    if (keys.has(t.key)) continue;
+    const n = { id: ++DB.seq, imp: impId, key: t.key, acct, date: t.date, amount: t.amount, payee: t.payee, memo: t.memo, number: '', cleared: '', category: '', cls: '', transfer: null, splits: [], tags: [], pp: t.kind };
+    DB.tx.push(n); added.push(n);
+  }
+  const ruled = applyRules(added.filter(n => n.pp === 'pay')).length;
+  for (const n of added) if (n.pp !== 'pay') { const m = ppBankMatch(n, acct, used); if (m) { used.add(m.id); ppLink(n, m); linked++; } }
+  DB.tx.sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+  DB.imports.push({ id: impId, file: st.file, date: new Date().toISOString(), count: added.length });
+  await archiveImported(st, acct);
+  if (UI.csv === st) UI.csv = null; save();
+  const open = added.filter(n => n.pp !== 'pay' && !n.transfer).length;
+  const msg = `${added.length} PayPal-Buchungen in „${acct}“ importiert${linked ? `, ${linked} mit dem Bankkonto verknüpft` : ''}${open ? `, ${open} Aufladungen warten noch auf die Bankbuchung` : ''}${ruled ? `, ${ruled} per Regel zugeordnet` : ''}.`;
+  if (opts.auto) return msg;
+  if (nextCsv()) { toast(msg + ' Weiter mit der nächsten Datei.', null, 9000); return; }
+  UI.f = Object.assign(NOFILTER(), { acct }); location.hash = 'buchungen'; render(); toast(msg, null, 9000);
 }
 
 /* Frühere Importe derselben Datei (z. B. als normale CSV in ein einziges Konto) */
@@ -3138,11 +3327,12 @@ function fintsImport() {
   if (!lines.length) return toast('Bitte mindestens ein Konto zum Übernehmen wählen.');
   const merged = dedupeTransfers(DB);
   const ruled = applyRules(added.filter(n => !n.transfer)).length;
+  const ppLinked = ppRelink();
   DB.tx.sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
   DB.imports.push({ id: impId, file: 'Online-Abruf ' + i.name, date: new Date().toISOString(), count: added.length });
   i.online.lastFetch = new Date().toISOString();
   save();
-  e.imported = `Übernommen. ${lines.join('. ')}.${upgraded + merged ? ` ${upgraded + merged} Umbuchungen abgeglichen.` : ''}${ruled ? ` ${ruled} per Regel zugeordnet.` : ''}`;
+  e.imported = `Übernommen. ${lines.join('. ')}.${upgraded + merged ? ` ${upgraded + merged} Umbuchungen abgeglichen.` : ''}${ruled ? ` ${ruled} per Regel zugeordnet.` : ''}${ppLinked ? ` ${ppLinked} PayPal-Zahlungen verknüpft.` : ''}`;
   showDialog(); render();
 }
 
@@ -3190,6 +3380,11 @@ const Drop = {
       if (st.hold) {
         if (!st.hold.strong) return inbox('Depotübersicht: Beim ersten Mal bitte von Hand übernehmen, damit das Depot zugeordnet oder angelegt wird.');
         const msg = await commitHold(st, { auto: true });
+        return msg ? { name: f.name, msg } : inbox('Import abgebrochen.');
+      }
+      if (st.pp) {
+        if (st.pp.acct === '__new') return inbox('PayPal: Beim ersten Mal bitte von Hand importieren, damit das PayPal-Konto angelegt wird.');
+        const msg = await commitPP(st, { auto: true });
         return msg ? { name: f.name, msg } : inbox('Import abgebrochen.');
       }
       if (st.tr) {
@@ -4368,7 +4563,7 @@ Views.import = () => {
       </label>
       <p class="muted">Die Datei wird nur in diesem Browser gelesen und nicht verändert. Bereits importierte Buchungen werden erkannt und übersprungen. Bei PDFs fragt Kontor, ob es ein Kontoauszug ist (Ablage unter dem Konto) oder ein Beleg zu einer Buchung. Bilder sind immer Belege.</p>
     </div>
-    ${UI.csv ? (UI.csv.tr ? trPanel() : UI.csv.hold ? holdPanel() : csvPanel()) : ''}
+    ${UI.csv ? (UI.csv.tr ? trPanel() : UI.csv.pp ? ppPanel() : UI.csv.hold ? holdPanel() : csvPanel()) : ''}
     ${preview}`;
 };
 
@@ -4639,6 +4834,8 @@ document.addEventListener('change', e => {
   else if (t.dataset.secfix) { const v = t.value.trim(), s = (DB.securities = DB.securities || {})[t.dataset.secfix] || (DB.securities[t.dataset.secfix] = {}); s.fix = s.fix || {}; let n = null; if (v) { n = parseFloat(v.replace(/\./g, '').replace(',', '.')); if (!(n >= 0)) { toast('Bitte eine Zahl eingeben, z. B. 12,5.'); return render(); } } const calc = (depotPositions(t.dataset.acct).find(p => p.isin === t.dataset.secfix) || {}).shares; if (n == null || (calc != null && Math.abs(n - calc) < 1e-9)) delete s.fix[t.dataset.acct]; else s.fix[t.dataset.acct] = n; save(); render(); }
   else if (t.id === 'tr-cash' || t.id === 'tr-depot') { UI.csv.tr[t.id.slice(3)] = t.value; render(); }
   else if (t.id === 'tr-cashname') { UI.csv.tr.cashName = t.value; render(); }
+  else if (t.id === 'pp-acct') { UI.csv.pp.acct = t.value; render(); }
+  else if (t.id === 'pp-name') { UI.csv.pp.newName = t.value; render(); }
   else if (t.id === 'tr-depotname') { UI.csv.tr.depotName = t.value; render(); }
   else if (t.id === 'tr-dropold') { UI.csv.tr.dropOld = t.checked; render(); }
   else if (t.id === 'tr-dropovl') { UI.csv.tr.dropOvl = t.checked; render(); }
@@ -4719,7 +4916,7 @@ document.addEventListener('input', e => {
   else if (t.id === 'ed-amount' || t.classList.contains('sp-amt')) updateRest();
   else if (ED && ED.mode === 'rule' && t.closest('#dlg')) updateRulePreview();
   else if (ED && ED.mode === 'contract' && t.closest('#dlg')) updateContractPreview();
-  else if (ED && ED.mode === 'loan' && t.closest('#dlg')) updateLoanPreview();
+  else if (ED && ED.mode === 'loan' && t.closest('#dlg')) { if (!t.classList.contains('date')) t.removeAttribute('aria-invalid'); updateLoanPreview(); }
 });
 
 function dialogChange(t) {
@@ -4776,7 +4973,11 @@ document.addEventListener('click', e => {
   } else c.checked ? UI.sel.add(id) : UI.sel.delete(id);
   UI.lastSel = id; render();
 });
-$('#dlg').addEventListener('close', () => { placeToast(); Fints.stop(); ED = null; });
+$('#dlg').addEventListener('close', () => {
+  // Das Ereignis kommt verzögert. Ist inzwischen schon der nächste Dialog offen (z. B. Konto → Kredit), bleibt dessen Zustand stehen.
+  if ($('#dlg').open) return;
+  placeToast(); Fints.stop(); ED = null;
+});
 
 function editorClick(t) {
   const a = t.dataset.ed;
@@ -4813,7 +5014,7 @@ function editorClick(t) {
     if (a === 'del') { $('#ed-del-box').innerHTML = '<span>Konto wirklich löschen?</span><button type="button" class="danger" data-ed="del-yes">Ja, löschen</button><button type="button" data-ed="del-no">Nein</button>'; }
     else if (a === 'del-yes') { const n = ED.orig; delete DB.accounts[n]; for (const g of DB.groups) g.accts = g.accts.filter(x => x !== n); if (UI.f.acct === n) UI.f.acct = ''; save(); closeDialog(); render(); toast(`Konto „${n}“ gelöscht.`); }
     else if (a === 'del-no') showDialog();
-    else if (a === 'toloan') { const n = ED.orig; closeDialog(); acctToLoan(n); }
+    else if (a === 'toloan') { const n = ED.orig; acctToLoan(n); }
     else if (a === 'addrate') { readAcct(); const last = ED.rates[ED.rates.length - 1]; ED.rates.push({ from: TODAY, rate: last ? last.rate : '' }); showDialog(); const el = $('#rt-rate-' + (ED.rates.length - 1)); if (el) el.focus(); }
     else if (a === 'rmrate') { readAcct(); ED.rates.splice(+t.dataset.i, 1); showDialog(); }
     else if (a === 'addfund') { readAcct(); ED.pension.funds.push({ name: '', isin: '', units: '', price: '', date: TODAY }); showDialog(); const el = $('#pf-name-' + (ED.pension.funds.length - 1)); if (el) el.focus(); }
@@ -4936,6 +5137,7 @@ document.addEventListener('click', e => {
   if (t.id === 'co-unignore') { const n = DB.contractIgnore.length; DB.contractIgnore = []; save(); render(); return toast(`${n} ausgeblendete Zahlungen werden wieder angezeigt.`); }
   if (t.id === 'csv-go') return commitCSV();
   if (t.id === 'tr-go') return commitTR();
+  if (t.id === 'pp-go') return commitPP();
   if (t.id === 'hold-go') return commitHold();
   if (t.id === 'csv-cancel') { UI.csv = null; if (!nextCsv()) render(); return; }
   if (t.id === 'stmt-store') { const a = $('#stmt-acct').value; if (!a) return toast('Bitte zuerst das Konto wählen.'); UI.stmtAcct = a; return storeStatements(a, UI.stmtFiles || []); }

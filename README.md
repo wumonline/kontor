@@ -5,7 +5,7 @@ Verträge und Abos, Kredite, Depot mit aktuellen Kursen. Die Daten bleiben auf d
 
 ## Funktionen
 
-- **Import:** Quicken (QIF), CSV vieler Banken mit Duplikaterkennung und Saldoabgleich, Trade Republic (Cash-Konto und Depot getrennt)
+- **Import:** Quicken (QIF), CSV vieler Banken mit Duplikaterkennung und Saldoabgleich, Trade Republic (Cash-Konto und Depot getrennt), PayPal (eigenes Konto mit Händlern, Aufladungen werden mit der Abbuchung im Girokonto verknüpft)
 - **Online-Abruf per FinTS/HBCI** mit TAN-Freigabe (pushTAN, photoTAN, chipTAN manuell). Die PIN wird nie gespeichert.
 - **Umbuchungen** zwischen eigenen Konten, automatisch verknüpft und abgeglichen
 - **Belege an Buchungen** (Rechnungen, Fotos): im Buchungsdialog oder beim Hochladen mit Vorschlägen aus dem Dateinamen
