@@ -9,7 +9,8 @@ Verträge und Abos, Kredite, Depot mit aktuellen Kursen. Die Daten bleiben auf d
 - **Online-Abruf per FinTS/HBCI** mit TAN-Freigabe (pushTAN, photoTAN, chipTAN manuell). Die PIN wird nie gespeichert.
 - **Umbuchungen** zwischen eigenen Konten, automatisch verknüpft und abgeglichen
 - **Belege an Buchungen** (Rechnungen, Fotos): im Buchungsdialog oder beim Hochladen mit Vorschlägen aus dem Dateinamen
-- **Kategorien, Tags und Regeln** für die automatische Zuordnung; Tags für viele Buchungen auf einmal per Mehrfachauswahl
+- **Sparen und Tilgung** getrennt von den Ausgaben: Umbuchungen auf Spar-, Depot- und Rentenkonten zählen als Sparen, Kreditraten als Tilgung plus Zinsen
+- **Kategorien, Tags und Regeln** für die automatische Zuordnung, auch als Umbuchung auf ein Konto; Tags für viele Buchungen auf einmal per Mehrfachauswahl
 - **Kontogruppen** nach Kontoart oder selbst angelegt, mit Summen und als Buchungsfilter
 - **Sparkonten** mit Zinssatz-Verlauf und Zinshochrechnung, **Rentenkonten** mit Auszahlungstermin, Fondsguthaben und Umbuchung der Beiträge aus Sammelabbuchungen
 - **Geldfluss** als Sankey-Diagramm: Einnahmen → Konten → Ausgaben

@@ -255,13 +255,14 @@ button.clip { border: 0; background: none; padding: 0 2px; color: var(--muted); 
 .sankey { display: block; }
 .sankey .link { fill: none; stroke-opacity: .32; transition: stroke-opacity .15s; }
 .sankey .link:hover, .sankey .link.hot { stroke-opacity: .7; }
-.sankey .link.k-in { stroke: var(--pos); } .sankey .link.k-x { stroke: var(--tin); } .sankey .link.k-out { stroke: var(--minus); } .sankey .link.k-keep { stroke: var(--c4); } .sankey .link.k-res { stroke: var(--muted); }
+.sankey .link.k-in { stroke: var(--pos); } .sankey .link.k-x { stroke: var(--tin); } .sankey .link.k-out { stroke: var(--minus); } .sankey .link.k-keep { stroke: var(--c4); } .sankey .link.k-res { stroke: var(--muted); } .sankey .link.k-save { stroke: var(--c7); } .sankey .link.k-tilg { stroke: var(--c5); }
 .sankey rect.node { fill: var(--fg); rx: 2px; }
 .sankey rect.node.acct { fill: var(--accent); }
 .sankey text { fill: var(--fg); font-size: 0.857rem; paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
 .sankey text .amt { fill: var(--muted); }
 .sankey g.n:hover text { font-weight: 600; }
-.legend i.k-in { background: var(--pos); } .legend i.k-x { background: var(--tin); } .legend i.k-out { background: var(--minus); } .legend i.k-keep { background: var(--c4); } .legend i.k-res { background: var(--muted); }
+.legend i.k-in { background: var(--pos); } .legend i.k-x { background: var(--tin); } .legend i.k-out { background: var(--minus); } .legend i.k-keep { background: var(--c4); } .legend i.k-res { background: var(--muted); } .legend i.k-save { background: var(--c7); } .legend i.k-tilg { background: var(--c5); }
+.chart .save { fill: var(--c7); }
 @media (max-width: 760px) {
   .app { grid-template-columns: 1fr; }
   .nav { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 12px 16px; gap: 8px; }
@@ -703,6 +704,22 @@ function unlinkCounterpart(t) {
   if (o.gen === t.id || (!o.imp && String(o.key || '').startsWith('m'))) { DB.tx = DB.tx.filter(x => x !== o); return 'deleted'; }
   o.transfer = null; o.category = ''; return o;
 }
+/* Buchung zur Umbuchung machen: vorhandenes Gegenstück verknüpfen oder Gegenbuchung anlegen.
+   Liefert, was rückgängig zu machen wäre: { linked, prevO } oder { created }. */
+function linkTransfer(t, to) {
+  t.transfer = to; t.category = ''; delete t.byRule;
+  const o = findCounterpart(t, to);
+  if (o) {
+    const prevO = { transfer: o.transfer || null, category: o.category, link: o.link, byRule: o.byRule };
+    o.transfer = t.acct; o.category = ''; delete o.byRule; o.link = t.id; t.link = o.id;
+    return { linked: o.id, prevO, date: o.date };
+  }
+  const c = { id: ++DB.seq, imp: null, key: 'gen|' + t.key + '|' + to + '|' + t.amount, acct: to, date: t.date, amount: -t.amount,
+    payee: t.payee, memo: t.memo, number: '', cleared: '', category: '', cls: '', transfer: t.acct, splits: [], tags: (t.tags || []).slice(), gen: t.id, link: t.id };
+  t.link = c.id; DB.tx.push(c);
+  DB.tx.sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+  return { created: c.id };
+}
 function setTransfer(id, to) {
   const t = DB.tx.find(x => x.id === id); if (!t || to === t.acct) return;
   if ((t.transfer || '') === (to || '')) return;
@@ -712,18 +729,8 @@ function setTransfer(id, to) {
   let msg;
   if (!to) { t.transfer = null; msg = 'Keine Umbuchung mehr. Wähle jetzt eine Kategorie.'; }
   else {
-    t.transfer = to; t.category = ''; delete t.byRule;
-    const o = findCounterpart(t, to);
-    if (o) {
-      o.transfer = t.acct; o.category = ''; delete o.byRule; o.link = t.id; t.link = o.id;
-      msg = `Umbuchung ${arrow} „${to}“: mit der Buchung vom ${dDE(o.date)} dort verknüpft.`;
-    } else {
-      const c = { id: ++DB.seq, imp: null, key: 'gen|' + t.key + '|' + to + '|' + t.amount, acct: to, date: t.date, amount: -t.amount,
-        payee: t.payee, memo: t.memo, number: '', cleared: '', category: '', cls: '', transfer: t.acct, splits: [], tags: (t.tags || []).slice(), gen: t.id, link: t.id };
-      t.link = c.id; DB.tx.push(c);
-      DB.tx.sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
-      msg = `Umbuchung ${arrow} „${to}“: dort gab es kein Gegenstück, die Gegenbuchung wurde angelegt.`;
-    }
+    const r = linkTransfer(t, to);
+    msg = r.linked ? `Umbuchung ${arrow} „${to}“: mit der Buchung vom ${dDE(r.date)} dort verknüpft.` : `Umbuchung ${arrow} „${to}“: dort gab es kein Gegenstück, die Gegenbuchung wurde angelegt.`;
   }
   if (freed && freed !== 'deleted') msg += ` Die bisherige Gegenbuchung in „${freed.acct}“ steht jetzt ohne Kategorie da.`;
   save(); render();
@@ -1498,7 +1505,7 @@ const RULE_FIELDS = { any: 'Empfänger oder Memo', payee: 'Empfänger', memo: 'M
 const RULE_OPS = { contains: 'enthält', equals: 'ist genau', starts: 'beginnt mit', regex: 'passt zum Muster' };
 function newRule(extra) {
   return Object.assign({ id: 'r' + Date.now() + Math.floor(Math.random() * 1000), active: true, field: 'any', op: 'contains', value: '',
-    acct: '', sign: 'any', min: null, max: null, category: '', tags: [], rename: '' }, extra || {});
+    acct: '', sign: 'any', min: null, max: null, category: '', transfer: '', tags: [], rename: '' }, extra || {});
 }
 function ruleMatches(r, t) {
   if (!r.value || t.transfer || (t.splits && t.splits.length)) return false;
@@ -1522,9 +1529,11 @@ function ruleMatches(r, t) {
   });
 }
 const ruleFor = t => DB.rules.find(r => r.active && ruleMatches(r, t));
+const ruleXfer = (r, t) => !!r.transfer && r.transfer !== t.acct && !!DB.accounts[r.transfer];
 function applyRuleTo(r, t) {
-  const prev = { category: t.category, payee: t.payee, payeeOrig: t.payeeOrig, tags: (t.tags || []).slice(), byRule: t.byRule };
-  if (r.category) t.category = r.category;
+  const prev = { category: t.category, payee: t.payee, payeeOrig: t.payeeOrig, tags: (t.tags || []).slice(), byRule: t.byRule, transfer: t.transfer || null, link: t.link };
+  if (ruleXfer(r, t)) prev.xfer = linkTransfer(t, r.transfer);
+  else if (r.category) t.category = r.category;
   if (r.tags && r.tags.length) t.tags = [...new Set([...(t.tags || []), ...r.tags])];
   if (r.rename) { if (!t.payeeOrig) t.payeeOrig = t.payee; t.payee = r.rename; }
   t.byRule = r.id;
@@ -1535,7 +1544,8 @@ function applyRules(txs, opts = {}) {
   for (const t of txs) {
     if (!opts.overwrite && t.category) continue;
     const r = ruleFor(t); if (!r) continue;
-    if (!r.category && !(r.tags || []).length && !r.rename) continue;
+    if (!r.category && !r.transfer && !(r.tags || []).length && !r.rename) continue;
+    if (r.transfer && !ruleXfer(r, t)) continue;
     changes.push({ id: t.id, prev: applyRuleTo(r, t) });
   }
   for (const r of DB.rules) for (const g of r.tags || []) if (!DB.tags.includes(g)) DB.tags.push(g);
@@ -1547,7 +1557,7 @@ function rulePlayCounts(r) {
   for (const t of DB.tx) {
     if (!ruleMatches(r, t)) continue;
     if (!t.category) open++;
-    else if (r.category && t.category !== r.category) other++;
+    else if ((r.category && t.category !== r.category) || r.transfer) other++;
   }
   return { open, other };
 }
@@ -1555,14 +1565,21 @@ function runRule(r, overwrite) {
   const changes = [];
   for (const t of DB.tx) {
     if (!ruleMatches(r, t)) continue;
-    if (t.category && !(overwrite && r.category && t.category !== r.category)) continue;
+    if (t.category && !(overwrite && ((r.category && t.category !== r.category) || r.transfer))) continue;
+    if (r.transfer && !ruleXfer(r, t)) continue;
     changes.push({ id: t.id, prev: applyRuleTo(r, t) });
   }
   for (const g of r.tags || []) if (!DB.tags.includes(g)) DB.tags.push(g);
   return changes;
 }
 function undoChanges(changes) {
-  for (const c of changes) { const t = DB.tx.find(x => x.id === c.id); if (t) Object.assign(t, c.prev); }
+  for (const c of changes.slice().reverse()) {
+    const t = DB.tx.find(x => x.id === c.id); if (!t) continue;
+    const { xfer, ...prev } = c.prev;
+    Object.assign(t, prev); if (prev.link == null) delete t.link; if (prev.byRule == null) delete t.byRule;
+    if (xfer && xfer.created) DB.tx = DB.tx.filter(x => x.id !== xfer.created);
+    if (xfer && xfer.linked) { const o = DB.tx.find(x => x.id === xfer.linked); if (o) { Object.assign(o, xfer.prevO); if (xfer.prevO.link == null) delete o.link; if (xfer.prevO.byRule == null) delete o.byRule; } }
+  }
 }
 function ruleText(r) {
   const parts = [`${RULE_FIELDS[r.field]} ${RULE_OPS[r.op]} „${r.value}“`];
@@ -1573,7 +1590,8 @@ function ruleText(r) {
 }
 function ruleAction(r) {
   const a = [];
-  if (r.category) a.push(`Kategorie ${r.category}`);
+  if (r.transfer) a.push(`Umbuchung mit „${r.transfer}“`);
+  else if (r.category) a.push(`Kategorie ${r.category}`);
   if (r.tags && r.tags.length) a.push(`Tags ${r.tags.join(', ')}`);
   if (r.rename) a.push(`Empfänger wird „${r.rename}“`);
   return a.join(' · ') || '–';
@@ -1600,7 +1618,8 @@ function ruleForm() {
     </div>
     <h3 class="step">Dann</h3>
     <div class="form">
-      <label class="field"><span>Kategorie setzen</span><input type="text" id="ru-cat" list="catlist" value="${esc(e.category)}" placeholder="z. B. Einkaufen:Lebensmittel"></label>
+      <label class="field"><span>Kategorie setzen</span><input type="text" id="ru-cat" list="catlist" value="${esc(e.category)}" placeholder="z. B. Einkaufen:Lebensmittel" ${e.transfer ? 'disabled' : ''}></label>
+      <label class="field"><span>Oder Umbuchung auf Konto</span><select id="ru-xfer"><option value="">Keine Umbuchung</option>${Object.values(DB.accounts).sort((a, b) => (a.inactive - b.inactive) || a.name.localeCompare(b.name, 'de')).map(a => `<option value="${esc(a.name)}" ${a.name === e.transfer ? 'selected' : ''}>${esc(a.name)}${a.inactive ? ' (inaktiv)' : ''}</option>`).join('')}</select></label>
       <label class="field"><span>Tags hinzufügen (Komma-getrennt)</span><input type="text" id="ru-tags" value="${esc((e.tags || []).join(', '))}"></label>
       <label class="field wide"><span>Empfänger umbenennen (optional)</span><input type="text" id="ru-rename" value="${esc(e.rename)}" placeholder="z. B. aus „PETZ REWE GmbH“ wird „REWE“"></label>
       <label class="field check wide"><input type="checkbox" id="ru-active" ${e.active ? 'checked' : ''}> <span>Regel ist aktiv</span></label>
@@ -1617,7 +1636,7 @@ function readRule() {
   e.field = v('ru-field'); e.op = v('ru-op'); e.value = v('ru-value').trim(); e.acct = v('ru-acct'); e.sign = v('ru-sign');
   const num = s => { s = s.trim(); if (!s) return null; try { return Math.abs(QIF.amount(s)); } catch (err) { return NaN; } };
   e.min = num(v('ru-min')); e.max = num(v('ru-max'));
-  e.category = v('ru-cat').trim(); e.tags = parseTags(v('ru-tags')); e.rename = v('ru-rename').trim(); e.active = $('#ru-active').checked;
+  e.transfer = v('ru-xfer'); e.category = e.transfer ? '' : v('ru-cat').trim(); e.tags = parseTags(v('ru-tags')); e.rename = v('ru-rename').trim(); e.active = $('#ru-active').checked;
 }
 function updateRulePreview() {
   const el = $('#rule-preview'); if (!el || !ED || ED.mode !== 'rule') return;
@@ -1626,10 +1645,11 @@ function updateRulePreview() {
   if (ED.op === 'regex') { try { new RegExp(ED.value, 'i'); } catch (err) { el.innerHTML = '<p class="neg">Das Muster ist kein gültiger regulärer Ausdruck.</p>'; return; } }
   const hits = DB.tx.filter(t => ruleMatches(ED, t));
   const open = hits.filter(t => !t.category);
-  const other = hits.filter(t => t.category && ED.category && t.category !== ED.category);
+  const other = hits.filter(t => t.category && ((ED.category && t.category !== ED.category) || ED.transfer));
   const earlier = DB.rules.filter(r => r.id !== ED.id && r.active);
   const shadowed = open.filter(t => { const f = earlier.find(r => ruleMatches(r, t)); return f && DB.rules.indexOf(f) < (ED.isNew ? Infinity : DB.rules.findIndex(r => r.id === ED.id)); }).length;
-  el.innerHTML = `<p><b>${hits.length}</b> Buchungen passen, davon <b>${open.length}</b> ohne Kategorie.${other.length ? ` ${other.length} haben schon eine andere Kategorie und bleiben unverändert.` : ''}${shadowed ? ` <span class="neg">${shadowed} davon greift schon eine frühere Regel.</span>` : ''}</p>
+  const self = ED.transfer ? hits.filter(t => t.acct === ED.transfer).length : 0;
+  el.innerHTML = `<p><b>${hits.length}</b> Buchungen passen, davon <b>${open.length}</b> ohne Kategorie.${ED.transfer ? ` Sie werden zu Umbuchungen mit „${esc(ED.transfer)}“, mit verknüpfter oder neu angelegter Gegenbuchung.${self ? ` ${self} liegen schon in diesem Konto und bleiben unverändert.` : ''}` : ''}${other.length ? ` ${other.length} haben schon eine andere Kategorie und bleiben unverändert.` : ''}${shadowed ? ` <span class="neg">${shadowed} davon greift schon eine frühere Regel.</span>` : ''}</p>
     ${hits.length ? `<div class="table-wrap"><table><tbody>${hits.slice().reverse().slice(0, 6).map(t => `<tr><td class="num">${dDE(t.date)}</td><td>${esc(displayPayee(t))}</td><td>${t.category ? esc(t.category) : '<span class="chip warn">ohne</span>'}</td><td class="r num ${moneyCls(t.amount)}">${money(t.amount)}</td></tr>`).join('')}</tbody></table></div>` : ''}`;
 }
 function saveRule() {
@@ -1638,9 +1658,10 @@ function saveRule() {
   if (!e.value) return toast('Bitte einen Text für die Bedingung eingeben.');
   if (e.op === 'regex') { try { new RegExp(e.value, 'i'); } catch (err) { return toast('Das Muster ist kein gültiger regulärer Ausdruck.'); } }
   if (Number.isNaN(e.min) || Number.isNaN(e.max)) return toast('Betrag nicht lesbar.');
-  if (!e.category && !e.tags.length && !e.rename) return toast('Die Regel braucht mindestens eine Aktion, z. B. eine Kategorie.');
+  if (!e.category && !e.transfer && !e.tags.length && !e.rename) return toast('Die Regel braucht mindestens eine Aktion, z. B. eine Kategorie oder eine Umbuchung.');
+  if (e.transfer && e.acct === e.transfer) return toast('Die Regel kann nicht auf das eigene Konto umbuchen. Wähle bei „Nur bei Konto“ ein anderes Konto.');
   const applyNow = $('#ru-applynow').checked;
-  const r = { id: e.id, active: e.active, field: e.field, op: e.op, value: e.value, acct: e.acct, sign: e.sign, min: e.min, max: e.max, category: e.category, tags: e.tags, rename: e.rename };
+  const r = { id: e.id, active: e.active, field: e.field, op: e.op, value: e.value, acct: e.acct, sign: e.sign, min: e.min, max: e.max, category: e.category, transfer: e.transfer || '', tags: e.tags, rename: e.rename };
   const i = DB.rules.findIndex(x => x.id === r.id);
   if (i >= 0) DB.rules[i] = r; else DB.rules.push(r);
   if (r.category && !DB.categories[r.category]) DB.categories[r.category] = { name: r.category, income: r.sign === 'in', desc: '' };
@@ -2007,6 +2028,68 @@ function loanInfo(l, sim) {
   return i;
 }
 const loanSign = l => l.direction === 'claim' ? 1 : -1;
+
+/* ---------- Sparen und Tilgung ----------
+   Vermögensaufbau ist keine Ausgabe. Gezählt wird von den Alltagskonten aus (Giro, Kreditkarte, Bargeld …):
+   Umbuchung auf ein Depot-, Tagesgeld-, Spar-, Renten- oder Vermögenskonto ist Sparen, zurück ist Entnahme.
+   Die Kategorie „Sparen“ (mit Unterkategorien) zählt genauso. Raten auf einen Kredit sind Tilgung plus Zinsen;
+   die Zinsen laut Tilgungsplan bleiben Ausgabe. Geld aus einem Kredit aufs Girokonto ist Kreditaufnahme. */
+const SAVE_TYPES = new Set(['Port', 'Invst', 'Oth T', 'Save', 'Pens', 'Oth A']);
+const SAVE_CAT = 'Sparen';
+const isLoanAcct = n => !!loanOfAcct(n) || (DB.accounts[n] || {}).type === 'Oth L';
+const isSaveAcct = n => { const a = DB.accounts[n]; return !!a && SAVE_TYPES.has(a.type) && !loanOfAcct(n); };
+const isSpendAcct = n => !!DB.accounts[n] && !isSaveAcct(n) && !isLoanAcct(n);
+function wealthCtx() {
+  const plans = new Map(), matchers = (DB.loans || []).filter(l => l.match && !l.acct).map(l => [l, l.match.toLowerCase()]);
+  return {
+    /* Zinsanteil einer Rate: aus dem Tilgungsplan, vor dessen Beginn geschätzt aus Restschuld × Zinssatz / 12 */
+    interest(l, date, amt) {
+      if (!l || l.kind === 'private' || l.direction === 'claim' || !(l.rate > 0)) return 0;
+      if (!plans.has(l.id)) { const m = {}; try { for (const r of loanSchedule(l).rows) if (!r.extra) m[r.date.slice(0, 7)] = (m[r.date.slice(0, 7)] || 0) + r.interest; } catch (e) { } plans.set(l.id, m); }
+      let z = plans.get(l.id)[date.slice(0, 7)];
+      if (z == null) {
+        const debt = l.acct ? Math.max(0, -balance(l.acct, date)) : (l.balance != null && l.balanceDate && date >= l.balanceDate ? l.balance : l.principal) || 0;
+        z = date >= (l.start || '') ? Math.round(debt * l.rate / 1200 * (l.interval === 'quarterly' ? 3 : 1)) : 0;
+      }
+      return Math.max(0, Math.min(amt, z));
+    },
+    matchLoan(t) {
+      if (!matchers.length) return null;
+      const h = `${t.payee || ''} ${t.payeeOrig || ''} ${t.memo || ''}`.toLowerCase();
+      const f = matchers.find(([, m]) => h.includes(m)); return f ? f[0] : null;
+    }
+  };
+}
+/* Teile einer Buchung nach Art: in, out (mit Kategorie), save (Sparen/Entnahme, to = Ziel), tilg (Tilgung/Kreditaufnahme), x (neutrale Umbuchung) */
+function txParts(t, ctx) {
+  const A = t.acct, spend = isSpendAcct(A), out = [];
+  const parts = t.splits && t.splits.length ? t.splits.map(x => ({ transfer: x.transfer, cat: x.category, amount: x.amount })) : [{ transfer: t.transfer, cat: t.category, amount: t.amount }];
+  const rate = (l, amount, cat, to) => {
+    const z = ctx.interest(l, t.date, -amount);
+    if (z) out.push({ kind: 'out', amount: -z, cat: cat || 'Kreditzinsen', interest: true });
+    if (amount + z) out.push({ kind: 'tilg', amount: amount + z, to });
+  };
+  for (const q of parts) {
+    if (q.transfer) {
+      if (q.transfer === A) continue;
+      const B = q.transfer;
+      if (!spend) out.push({ kind: 'x', amount: q.amount, to: B });
+      else if (isSaveAcct(B)) out.push({ kind: 'save', amount: q.amount, to: B });
+      else if (isLoanAcct(B)) {
+        const l = loanOfAcct(B), name = l ? l.name : B;
+        if (l && l.direction === 'claim') out.push({ kind: 'save', amount: q.amount, to: name });
+        else if (q.amount < 0) rate(l, q.amount, '', name);
+        else out.push({ kind: 'tilg', amount: q.amount, to: name });
+      } else out.push({ kind: 'x', amount: q.amount, to: B });
+      continue;
+    }
+    if (spend && catIn(q.cat, SAVE_CAT)) { out.push({ kind: 'save', amount: q.amount, to: SAVE_CAT }); continue; }
+    const l = spend && q.amount < 0 ? ctx.matchLoan(t) : null;
+    if (l) { if (l.direction === 'claim') out.push({ kind: 'save', amount: q.amount, to: l.name }); else rate(l, q.amount, q.cat, l.name); continue; }
+    out.push({ kind: q.amount >= 0 ? 'in' : 'out', amount: q.amount, cat: q.cat });
+  }
+  return out;
+}
 const loanOfAcct = name => (DB.loans || []).find(l => l.acct === name) || null;
 /* Konto in „Kredite & Schulden“ verschieben: Kredit mit verknüpftem Konto vorbereiten */
 function acctToLoan(name) {
@@ -3275,19 +3358,23 @@ const Views = {};
 Views.uebersicht = () => {
   if (!DB.tx.length) return emptyState();
   const ys = years(); if (!UI.year || !ys.includes(UI.year)) UI.year = ys[0];
-  const inc = Array(12).fill(0), out = Array(12).fill(0), byCat = {};
-  const act = activeNames();
+  const inc = Array(12).fill(0), out = Array(12).fill(0), sav = Array(12).fill(0), til = Array(12).fill(0), byCat = {};
+  const act = activeNames(), ctx = wealthCtx();
   let xferN = 0;
   for (const t of DB.tx) {
     if (t.date.slice(0, 4) !== UI.year || !act.has(t.acct)) continue;
     const m = +t.date.slice(5, 7) - 1;
-    for (const f of flows(t)) {
+    for (const f of txParts(t, ctx)) {
+      if (f.kind === 'save') { sav[m] -= f.amount; continue; }
+      if (f.kind === 'tilg') { til[m] -= f.amount; continue; }
+      if (f.kind === 'x') continue;
       if (f.cat && XFER_ONLY.test(f.cat)) { xferN++; continue; }
       if (f.amount >= 0) inc[m] += f.amount; else out[m] -= f.amount;
       if (f.amount < 0) { const top = (f.cat || 'Ohne Kategorie').split(':')[0]; byCat[top] = (byCat[top] || 0) - f.amount; }
     }
   }
   const sumIn = inc.reduce((a, b) => a + b, 0), sumOut = out.reduce((a, b) => a + b, 0);
+  const sumSav = sav.reduce((a, b) => a + b, 0), sumTil = til.reduce((a, b) => a + b, 0);
   const accts = Object.values(DB.accounts).filter(a => !a.inactive && !loanOfAcct(a.name)).sort((a, b) => a.name.localeCompare(b.name, 'de'));
   const hidden = Object.values(DB.accounts).filter(a => a.inactive && !loanOfAcct(a.name)).length;
   const total = accts.reduce((s, a) => s + balance(a.name), 0);
@@ -3314,7 +3401,9 @@ Views.uebersicht = () => {
       })()}
       <div class="kpi"><div class="label">Einnahmen ${UI.year}</div><div class="value num">${money(sumIn)}</div></div>
       <div class="kpi"><div class="label">Ausgaben ${UI.year}</div><div class="value num">${money(sumOut)}</div></div>
-      <div class="kpi"><div class="label">Sparquote ${UI.year}</div><div class="value num ${moneyCls(rate)}">${rate} %</div></div>
+      <div class="kpi"><div class="label">Gespart ${UI.year}</div><div class="value num ${moneyCls(sumSav)}">${money(sumSav)}</div><div class="sub muted">auf Spar-, Depot- und Rentenkonten, Entnahmen abgezogen</div></div>
+      ${sumTil ? `<div class="kpi"><div class="label">Getilgt ${UI.year}</div><div class="value num ${moneyCls(sumTil)}">${money(sumTil)}</div><div class="sub muted">${sumTil > 0 ? 'Schulden abgebaut, ohne Zinsen' : 'mehr Kredit aufgenommen als getilgt'}</div></div>` : ''}
+      <div class="kpi"><div class="label">Sparquote ${UI.year}</div><div class="value num ${moneyCls(rate)}">${rate} %</div><div class="sub muted">Einnahmen minus Ausgaben</div></div>
       ${DB.loans.some(l => l.direction !== 'claim') ? (() => {
         const debt = DB.loans.filter(l => l.direction !== 'claim').reduce((s, l) => s + loanInfo(l).balanceToday, 0);
         const claim = DB.loans.filter(l => l.direction === 'claim').reduce((s, l) => s + loanInfo(l).balanceToday, 0);
@@ -3322,9 +3411,9 @@ Views.uebersicht = () => {
           <div class="kpi"><div class="label">Nettovermögen</div><div class="value num ${moneyCls(total - debt + claim)}">${money(total - debt + claim)}</div></div>`;
       })() : ''}
     </div>
-    <div class="panel"><div class="row spread"><h2>Einnahmen und Ausgaben pro Monat</h2>
-      <div class="legend"><span><i style="background:var(--pos)"></i>Einnahmen</span><span><i style="background:var(--minus)"></i>Ausgaben</span></div></div>
-      <div class="table-wrap">${monthChart(inc, out)}</div>
+    <div class="panel"><div class="row spread"><h2>Einnahmen, Ausgaben und Sparen pro Monat</h2>
+      <div class="legend"><span><i style="background:var(--pos)"></i>Einnahmen</span><span><i style="background:var(--minus)"></i>Ausgaben</span><span><i style="background:var(--c7)"></i>Gespart und getilgt</span></div></div>
+      <div class="table-wrap">${monthChart(inc, out, sav.map((v, i) => v + til[i]))}</div>
       <p class="muted">Umbuchungen zwischen eigenen Konten sind nicht mitgezählt${xferN ? `, auch nicht ${xferN} ${xferN === 1 ? 'Buchung' : 'Buchungen'} mit einer Kategorie wie „Umbuchung“` : ''}.</p></div>
     <div class="panel"><h2>Ausgaben nach Kategorie ${UI.year}</h2>
       ${catDonuts(byCat)}
@@ -3350,19 +3439,22 @@ function overviewAccounts(accts) {
   }
   return `<div class="panel"><div class="row spread"><h2>Konten</h2>${seg}</div>${hint}<div class="table-wrap"><table><tbody>${body}</tbody></table></div>`;
 }
-function monthChart(inc, out) {
+function monthChart(inc, out, sav) {
   const W = 720, H = 220, L = 70, B = 24, T = 10;
-  const max = Math.max(1, ...inc, ...out);
+  sav = sav || Array(12).fill(0);
+  const max = Math.max(1, ...inc, ...out, ...sav);
   const step = niceStep(max / 4), top = Math.ceil(max / step) * step;
   const y = v => T + (H - T - B) * (1 - v / top);
-  const cw = (W - L) / 12, bw = Math.min(18, cw / 3);
+  const cw = (W - L) / 12, bw = Math.min(14, cw / 4);
   let g = '';
   for (let v = 0; v <= top + 1; v += step) g += `<line class="grid" x1="${L}" x2="${W}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${EUR.format(v / 100).replace(/,00\s?€/, ' €')}</text>`;
   let bars = '';
   for (let m = 0; m < 12; m++) {
     const x = L + m * cw + cw / 2;
-    bars += `<rect class="in" x="${x - bw - 1}" y="${y(inc[m])}" width="${bw}" height="${y(0) - y(inc[m])}" rx="2"><title>${MONTHS[m]} Einnahmen ${money(inc[m])}</title></rect>`;
-    bars += `<rect class="out" x="${x + 1}" y="${y(out[m])}" width="${bw}" height="${y(0) - y(out[m])}" rx="2"><title>${MONTHS[m]} Ausgaben ${money(out[m])}</title></rect>`;
+    const sv = Math.max(0, sav[m]);
+    bars += `<rect class="in" x="${x - 1.5 * bw - 2}" y="${y(inc[m])}" width="${bw}" height="${y(0) - y(inc[m])}" rx="2"><title>${MONTHS[m]} Einnahmen ${money(inc[m])}</title></rect>`;
+    bars += `<rect class="out" x="${x - bw / 2}" y="${y(out[m])}" width="${bw}" height="${y(0) - y(out[m])}" rx="2"><title>${MONTHS[m]} Ausgaben ${money(out[m])}</title></rect>`;
+    bars += `<rect class="save" x="${x + bw / 2 + 2}" y="${y(sv)}" width="${bw}" height="${y(0) - y(sv)}" rx="2"><title>${MONTHS[m]} gespart und getilgt ${money(sav[m])}</title></rect>`;
     bars += `<text x="${x}" y="${H - 6}" text-anchor="middle">${MONTHS[m]}</text>`;
   }
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" width="100%" style="min-width:520px" role="img" aria-label="Einnahmen und Ausgaben pro Monat">${g}${bars}</svg>`;
@@ -3523,10 +3615,16 @@ Views.kategorien = () => {
   if (UI.catTab === 'tags') return `<h1>Kategorien</h1>${tabs}${manageTags()}`;
   if (!DB.tx.length) return `<h1>Kategorien</h1>${tabs}<div class="panel"><p class="muted">Noch keine Buchungen.</p></div>`;
   const ys = years(); if (!UI.year || !ys.includes(UI.year)) UI.year = ys[0];
-  const groups = { in: {}, out: {} }, act = activeNames();
+  const groups = { in: {}, out: {} }, act = activeNames(), ctx = wealthCtx(), wealth = {};
   for (const t of DB.tx) {
     if (t.date.slice(0, 4) !== UI.year || !act.has(t.acct)) continue;
-    for (const fl of flows(t)) {
+    for (const fl of txParts(t, ctx)) {
+      if (fl.kind === 'x') continue;
+      if (fl.kind === 'save' || fl.kind === 'tilg') {
+        const k = fl.kind + '\u0000' + fl.to, w = wealth[k] || (wealth[k] = { kind: fl.kind, to: fl.to, paid: 0, back: 0 });
+        if (fl.amount < 0) w.paid -= fl.amount; else w.back += fl.amount;
+        continue;
+      }
       const g = fl.amount >= 0 ? groups.in : groups.out;
       const name = fl.cat || 'Ohne Kategorie', top = name.split(':')[0];
       g[top] = g[top] || { total: 0, subs: {} };
@@ -3540,8 +3638,8 @@ Views.kategorien = () => {
     return `<div class="panel"><div class="row spread"><h2>${title}</h2><b class="num">${money(sum)}</b></div>
       ${e.map(([n, v]) => {
         const subs = Object.entries(v.subs).sort((a, b) => b[1] - a[1]);
-        const jump = c => c === 'Ohne Kategorie' ? '__none' : c;
-        const head = `<div class="cat-row"><span class="name"><a href="#buchungen" data-catjump="${esc(jump(n))}" data-catyear="${esc(UI.year)}" title="Buchungen ${esc(n)}${subs.length > 1 ? ' mit allen Unterkategorien' : ''}">${esc(n)}</a></span><div class="bar ${cls}"><span style="width:${(v.total / e[0][1].total * 100).toFixed(1)}%"></span></div><span class="num" style="text-align:right">${money(v.total)}</span></div>`;
+        const jump = c => c === 'Ohne Kategorie' ? '__none' : c === 'Kreditzinsen' ? '' : c;
+        const head = `<div class="cat-row"><span class="name">${jump(n) ? `<a href="#buchungen" data-catjump="${esc(jump(n))}" data-catyear="${esc(UI.year)}" title="Buchungen ${esc(n)}${subs.length > 1 ? ' mit allen Unterkategorien' : ''}">${esc(n)}</a>` : `<span title="Zinsanteil der Kreditraten laut Tilgungsplan">${esc(n)}</span>`}</span><div class="bar ${cls}"><span style="width:${(v.total / e[0][1].total * 100).toFixed(1)}%"></span></div><span class="num" style="text-align:right">${money(v.total)}</span></div>`;
         return subs.length > 1 || subs[0][0] !== n
           ? `<details><summary>${head}</summary><div style="padding-left:18px">${subs.map(([s, a]) => `<div class="cat-row"><span class="name muted"><a href="#buchungen" data-catjump="${esc(jump(s))}" data-catyear="${esc(UI.year)}" class="muted">${esc(s.split(':').slice(1).join(':') || s)}</a></span><span></span><span class="num muted" style="text-align:right">${money(a)}</span></div>`).join('')}</div></details>`
           : head;
@@ -3550,8 +3648,21 @@ Views.kategorien = () => {
   return `<div class="row spread"><h1>Kategorien</h1>
       <label class="row">Jahr <select id="year">${ys.map(y => `<option ${y === UI.year ? 'selected' : ''}>${y}</option>`).join('')}</select></label></div>
     ${tabs}
-    <div class="cols">${block(groups.out, '', 'Ausgaben')}${block(groups.in, 'in', 'Einnahmen')}</div>`;
+    <div class="cols">${block(groups.out, '', 'Ausgaben')}${block(groups.in, 'in', 'Einnahmen')}</div>
+    ${wealthPanel(Object.values(wealth))}`;
 };
+/* Sparen und Tilgung im Jahr: je Ziel eingezahlt, zurückgeholt, netto */
+function wealthPanel(list) {
+  if (!list.length) return '';
+  const lbl = w => w.kind === 'tilg' ? 'Tilgung ' + w.to : w.to === SAVE_CAT ? 'Kategorie „Sparen“' : w.to;
+  const row = w => `<tr><td>${esc(lbl(w))}</td><td class="r num">${money(w.paid)}</td><td class="r num">${w.back ? money(w.back) : '–'}</td><td class="r num ${moneyCls(w.paid - w.back)}"><b>${money(w.paid - w.back)}</b></td></tr>`;
+  const part = (kind, title, a, b) => { const l = list.filter(w => w.kind === kind).sort((x, y) => (y.paid - y.back) - (x.paid - x.back)); if (!l.length) return '';
+    const net = l.reduce((x, w) => x + w.paid - w.back, 0);
+    return `<tr class="grp"><td>${title}</td><td class="r">${a}</td><td class="r">${b}</td><td class="r num">${money(net)}</td></tr>${l.map(row).join('')}`; };
+  return `<div class="panel"><h2>Sparen und Tilgung ${UI.year}</h2>
+    <p class="muted">Kein Teil der Ausgaben: Geld auf Spar-, Depot- und Rentenkonten oder in die Tilgung von Krediten baut Vermögen auf. Kreditzinsen stehen bei den Ausgaben.</p>
+    <div class="table-wrap"><table><tbody>${part('save', 'Sparen', 'eingezahlt', 'entnommen')}${part('tilg', 'Kredite', 'getilgt', 'aufgenommen')}</tbody></table></div></div>`;
+}
 
 /* ---------- Geldfluss ----------
    Woher das Geld kommt, über welche Konten es läuft und wohin es geht, als Sankey-Diagramm:
@@ -3559,19 +3670,26 @@ Views.kategorien = () => {
    Was auf einem Konto bleibt, fließt nach „Auf den Konten geblieben“; wurde mehr ausgegeben als hereinkam,
    kommt der Rest „Aus dem Kontostand“. Umbuchungen zählen netto je Kontopaar. */
 const FLOW_TOP_IN = 5, FLOW_TOP_OUT = 8;
+const FLOW_KINDS = { in: 'Einnahme', x: 'Umbuchung', out: 'Ausgabe', save: 'Sparen', tilg: 'Tilgung', keep: 'Geblieben', res: 'Aus dem Bestand' };
 function flowData(period) {
   const act = new Set(Object.values(DB.accounts).filter(a => !a.inactive && !loanOfAcct(a.name)).map(a => a.name));
-  const cat = {}, xfer = {};
+  const cat = {}, xfer = {}, ext = {}, ctx = wealthCtx();
+  let savNet = 0, tilNet = 0;
   const addX = (a, b, v) => { const k = a + '\u0000' + b; xfer[k] = (xfer[k] || 0) + v; };
   const addC = (a, c, v) => { const m = cat[a] || (cat[a] = {}); m[c] = (m[c] || 0) + v; };
+  const addE = (f, t, v, kind) => { const k = f + '\u0000' + t; (ext[k] = ext[k] || { v: 0, kind }).v += v; };
   for (const t of DB.tx) {
     if (!t.date.startsWith(period) || t.date > TODAY || !act.has(t.acct)) continue;
-    const parts = t.splits && t.splits.length ? t.splits.map(x => ({ transfer: x.transfer, cat: x.category, amount: x.amount })) : [{ transfer: t.transfer, cat: t.category, amount: t.amount }];
-    for (const q of parts) {
-      if (q.transfer) {
-        if (q.transfer === t.acct) continue;                       // Eröffnungssaldo
-        if (q.amount < 0) addX(t.acct, q.transfer, -q.amount);      // jede Umbuchung nur von der abgebenden Seite zählen
-        else if (!act.has(q.transfer)) addX(q.transfer, t.acct, q.amount);
+    for (const q of txParts(t, ctx)) {
+      if (q.kind === 'save') savNet -= q.amount; else if (q.kind === 'tilg') tilNet -= q.amount;
+      if (q.kind === 'x' || (q.kind === 'save' && act.has(q.to))) {
+        if (q.amount < 0) addX(t.acct, q.to, -q.amount);           // jede Umbuchung nur von der abgebenden Seite zählen
+        else if (!act.has(q.to)) addX(q.to, t.acct, q.amount);
+        continue;
+      }
+      if (q.kind === 'save' || q.kind === 'tilg') {                 // Sparen ohne aktives Zielkonto, Tilgung von Krediten
+        const node = q.kind + ':' + q.to;
+        if (q.amount < 0) addE(t.acct, node, -q.amount, q.kind); else addE('from:' + node, t.acct, q.amount, 'x');
         continue;
       }
       addC(t.acct, (q.cat || 'Ohne Kategorie').split(':')[0].trim() || 'Ohne Kategorie', q.amount);
@@ -3582,8 +3700,10 @@ function flowData(period) {
   for (const k of Object.keys(xfer)) {
     const [a, b] = k.split('\u0000'), pk = [a, b].sort().join('\u0000'); if (seen.has(pk)) continue; seen.add(pk);
     const net = (xfer[a + '\u0000' + b] || 0) - (xfer[b + '\u0000' + a] || 0);
-    if (net > 0) links.push({ from: a, to: b, v: net, kind: 'x' }); else if (net < 0) links.push({ from: b, to: a, v: -net, kind: 'x' });
+    const kind = (f, t) => isSpendAcct(f) && isSaveAcct(t) ? 'save' : 'x';
+    if (net > 0) links.push({ from: a, to: b, v: net, kind: kind(a, b) }); else if (net < 0) links.push({ from: b, to: a, v: -net, kind: kind(b, a) });
   }
+  for (const [k, e] of Object.entries(ext)) { const [f, t] = k.split('\u0000'); links.push({ from: f, to: t, v: e.v, kind: e.kind }); }
   // Kategorien: netto je Konto und Kategorie; die größten einzeln, der Rest gesammelt
   const inTot = {}, outTot = {};
   for (const [a, m] of Object.entries(cat)) for (const [c, v] of Object.entries(m)) { if (v > 0) inTot[c] = (inTot[c] || 0) + v; else if (v < 0) outTot[c] = (outTot[c] || 0) - v; }
@@ -3599,17 +3719,19 @@ function flowData(period) {
   const accts = new Set(); for (const l of links) for (const n of [l.from, l.to]) if (act.has(n)) accts.add(n);
   for (const a of accts) {
     const inn = links.filter(l => l.to === a).reduce((x, l) => x + l.v, 0), out = links.filter(l => l.from === a).reduce((x, l) => x + l.v, 0);
-    if (inn > out) links.push({ from: a, to: 'keep', v: inn - out, kind: 'keep' });
+    if (inn > out) links.push(isSaveAcct(a) ? { from: a, to: 'keepsave', v: inn - out, kind: 'save' } : { from: a, to: 'keep', v: inn - out, kind: 'keep' });
     else if (out > inn) links.push({ from: 'res', to: a, v: out - inn, kind: 'res' });
   }
-  return { links: links.filter(l => l.v > 0), accts, act, inTot, outTot };
+  return { links: links.filter(l => l.v > 0), accts, act, inTot, outTot, savNet, tilNet };
 }
 /* Verfügbare Breite im Panel: Hauptbereich ohne seinen Innenabstand und ohne den des Panels */
 function flowWidth() {
   const m = $('#main'); if (!m) return 1100;
   const cs = getComputedStyle(m); return Math.floor(m.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - 2 * 19);
 }
-const flowLabel = n => n === 'keep' ? 'Auf den Konten geblieben' : n === 'res' ? 'Aus dem Kontostand' : n.replace(/^(in|out):/, '');
+const flowLabel = n => n === 'keep' ? 'Auf den Konten geblieben' : n === 'keepsave' ? 'Auf Spar- und Depotkonten' : n === 'res' ? 'Aus dem Kontostand'
+  : n === 'save:' + SAVE_CAT ? 'Sparen (Kategorie)' : n.startsWith('save:') ? 'Sparen: ' + n.slice(5) : n.startsWith('tilg:') ? 'Tilgung ' + n.slice(5)
+  : n.startsWith('from:save:') ? 'Entnahme ' + n.slice(10).replace(SAVE_CAT, 'Ersparnisse') : n.startsWith('from:tilg:') ? 'Kredit ' + n.slice(10) : n.replace(/^(in|out):/, '');
 function sankeySVG(fd) {
   const { links, act } = fd; if (!links.length) return '';
   const isAcct = n => act.has(n);
@@ -3637,7 +3759,8 @@ function sankeySVG(fd) {
   let H = 0;
   cols.forEach((c, i) => {
     if (!c) return;
-    c.sort((a, b) => ((a.n === 'keep' || a.n === 'res') - (b.n === 'keep' || b.n === 'res')) || b.v - a.v);
+    const end = n => n === 'keep' || n === 'keepsave' || n === 'res';
+    c.sort((a, b) => (end(a.n) - end(b.n)) || b.v - a.v);
     let y = TOP; for (const n of c) { n.h = Math.max(2, n.v * k); n.y = y; y += n.h + PAD; n.x = L + (W - L - Rm - NW) * i / last; }
     H = Math.max(H, y - PAD + TOP);
   });
@@ -3646,7 +3769,7 @@ function sankeySVG(fd) {
   const ls = links.map(l => Object.assign({}, l, { s: nodes[l.from], t: nodes[l.to], w: Math.max(1, l.v * k) }));
   ls.slice().sort((a, b) => a.t.y - b.t.y).forEach(l => { l.y0 = l.s.oy + l.w / 2; l.s.oy += l.w; });
   ls.slice().sort((a, b) => a.s.y - b.s.y).forEach(l => { l.y1 = l.t.iy + l.w / 2; l.t.iy += l.w; });
-  const kindTxt = { in: 'Einnahme', x: 'Umbuchung', out: 'Ausgabe', keep: 'Geblieben', res: 'Aus dem Bestand' };
+  const kindTxt = FLOW_KINDS;
   const paths = ls.sort((a, b) => b.w - a.w).map(l => {
     const x0 = l.s.x + NW, x1 = l.t.x, mx = (x0 + x1) / 2;
     return `<path class="link k-${l.kind}" d="M${x0.toFixed(1)},${l.y0.toFixed(1)} C${mx.toFixed(1)},${l.y0.toFixed(1)} ${mx.toFixed(1)},${l.y1.toFixed(1)} ${x1.toFixed(1)},${l.y1.toFixed(1)}" stroke-width="${l.w.toFixed(1)}" data-f="${esc(l.from)}" data-t="${esc(l.to)}"><title>${esc(flowLabel(l.from))} → ${esc(flowLabel(l.to))}: ${money(l.v)} (${kindTxt[l.kind]})</title></path>`;
@@ -3670,19 +3793,20 @@ Views.geldfluss = () => {
   const opts = ys.map(y => `<optgroup label="${y}"><option value="${y}" ${p === y ? 'selected' : ''}>Ganzes Jahr ${y}</option>${MONTHS.map((m, i) => { const v = `${y}-${String(i + 1).padStart(2, '0')}`; return `<option value="${v}" ${p === v ? 'selected' : ''}>${m} ${y}</option>`; }).join('')}</optgroup>`).join('');
   const sum = kind => fd.links.filter(l => l.kind === kind).reduce((x, l) => x + l.v, 0);
   const inc = Object.values(fd.inTot).reduce((a, b) => a + b, 0), out = Object.values(fd.outTot).reduce((a, b) => a + b, 0), xf = sum('x');
-  const rows = fd.links.slice().sort((a, b) => b.v - a.v).map(l => `<tr><td>${esc(flowLabel(l.from))}</td><td>${esc(flowLabel(l.to))}</td><td class="muted">${{ in: 'Einnahme', x: 'Umbuchung', out: 'Ausgabe', keep: 'Geblieben', res: 'Aus dem Bestand' }[l.kind]}</td><td class="r num">${money(l.v)}</td></tr>`).join('');
+  const rows = fd.links.slice().sort((a, b) => b.v - a.v).map(l => `<tr><td>${esc(flowLabel(l.from))}</td><td>${esc(flowLabel(l.to))}</td><td class="muted">${FLOW_KINDS[l.kind]}</td><td class="r num">${money(l.v)}</td></tr>`).join('');
   return `<div class="row spread"><h1>Geldfluss</h1>
       <label class="row">Zeitraum <select id="flow-period">${opts}</select></label></div>
     <div class="kpis">
       <div class="kpi"><div class="label">Einnahmen</div><div class="value num">${money(inc)}</div></div>
-      <div class="kpi"><div class="label">Zwischen Konten umgebucht</div><div class="value num">${money(xf)}</div></div>
       <div class="kpi"><div class="label">Ausgaben</div><div class="value num">${money(out)}</div></div>
-      <div class="kpi"><div class="label">Auf den Konten geblieben</div><div class="value num ${moneyCls(sum('keep') - sum('res'))}">${money(sum('keep') - sum('res'))}</div></div>
+      <div class="kpi"><div class="label">Gespart</div><div class="value num ${moneyCls(fd.savNet)}">${money(fd.savNet)}</div><div class="sub muted">Entnahmen abgezogen</div></div>
+      ${fd.tilNet ? `<div class="kpi"><div class="label">Getilgt</div><div class="value num ${moneyCls(fd.tilNet)}">${money(fd.tilNet)}</div><div class="sub muted">ohne Zinsen</div></div>` : ''}
+      <div class="kpi"><div class="label">Zwischen Girokonten umgebucht</div><div class="value num">${money(xf)}</div></div>
     </div>
     <div class="panel"><div class="row spread"><h2>Von den Einnahmen über die Konten zu den Ausgaben</h2>
-      <div class="legend"><span><i class="k-in"></i>Einnahmen</span><span><i class="k-x"></i>Umbuchungen</span><span><i class="k-out"></i>Ausgaben</span><span><i class="k-keep"></i>Geblieben</span>${sum('res') ? '<span><i class="k-res"></i>Aus dem Bestand</span>' : ''}</div></div>
+      <div class="legend"><span><i class="k-in"></i>Einnahmen</span><span><i class="k-x"></i>Umbuchungen</span><span><i class="k-out"></i>Ausgaben</span><span><i class="k-save"></i>Sparen</span>${sum('tilg') ? '<span><i class="k-tilg"></i>Tilgung</span>' : ''}<span><i class="k-keep"></i>Geblieben</span>${sum('res') ? '<span><i class="k-res"></i>Aus dem Bestand</span>' : ''}</div></div>
       ${fd.links.length ? `<div class="table-wrap">${sankeySVG(fd)}</div>` : '<p class="muted">Keine Buchungen in diesem Zeitraum.</p>'}
-      <p class="muted">Die Breite jedes Bandes entspricht dem Betrag. Umbuchungen zählen netto: Geht Geld zwischen zwei Konten hin und her, zeigt das Band nur den Überschuss. Inaktive Konten und Kreditkonten erscheinen als Ziel oder Quelle. Die ${FLOW_TOP_IN} größten Einnahme- und ${FLOW_TOP_OUT} größten Ausgabenkategorien stehen einzeln. Fahre über ein Band, um den Betrag zu sehen.</p>
+      <p class="muted">Die Breite jedes Bandes entspricht dem Betrag. Umbuchungen zählen netto: Geht Geld zwischen zwei Konten hin und her, zeigt das Band nur den Überschuss. Geld auf Spar-, Depot- und Rentenkonten zählt als Sparen, Kreditraten als Tilgung; die Zinsen darin stehen bei den Ausgaben unter „Kreditzinsen“. Die ${FLOW_TOP_IN} größten Einnahme- und ${FLOW_TOP_OUT} größten Ausgabenkategorien stehen einzeln. Fahre über ein Band, um den Betrag zu sehen.</p>
       ${rows ? `<details class="sub-panel"><summary>Als Tabelle</summary><div class="table-wrap"><table><thead><tr><th>Von</th><th>Nach</th><th>Art</th><th class="r">Betrag</th></tr></thead><tbody>${rows}</tbody></table></div></details>` : ''}
     </div>`;
 };
@@ -4477,7 +4601,7 @@ function dialogChange(t) {
   if (ED.mode === 'group') return;
   if (ED.mode === 'inst') return;
   if (ED.mode === 'fints') { if (t.dataset.fimap !== undefined) { ED.map[t.dataset.fimap] = t.value; showDialog(); } return; }
-  if (ED.mode === 'rule') return updateRulePreview();
+  if (ED.mode === 'rule') { if (t.id === 'ru-xfer') { readRule(); return showDialog(); } return updateRulePreview(); }
   if (ED.mode === 'contract') return updateContractPreview();
   if (ED.mode === 'loan') { if (t.id === 'lo-kind' || t.id === 'lo-dir' || t.id === 'lo-acct') { readLoan(); return showDialog(); } return updateLoanPreview(); }
   if (t.name === 'ed-kind') {
