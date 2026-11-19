@@ -243,6 +243,10 @@ tr.picked td { background: var(--accent-soft); }
 tr.grp td { background: var(--bg); font-weight: 600; font-size: 0.857rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
 tr.grp td.num { text-transform: none; letter-spacing: 0; color: var(--fg); }
 .rates td input { width: 100%; }
+.ed input[aria-invalid="true"] { border-color: var(--minus); background: var(--warn-soft); }
+.missing-note { color: var(--minus); font-size: 0.929rem; }
+.notice .x { float: right; margin: -2px -6px 0 12px; border: 0; background: none; color: var(--muted); font-size: 1.1rem; line-height: 1; padding: 2px 6px; cursor: pointer; }
+.notice .x:hover { color: var(--fg); }
 .date-wrap { display: inline-flex; gap: 4px; align-items: center; max-width: 100%; }
 .field .date-wrap { display: flex; }
 .date-wrap input.date { width: 8.6em; min-width: 0; flex: 1 1 auto; font-variant-numeric: tabular-nums; }
@@ -349,14 +353,14 @@ const isoToDE = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '') ? `${v.slice(8, 10)}.${
 function enhanceDates(root) {
   if (!root) return;
   for (const el of root.querySelectorAll('input[type="date"]')) {
-    const iso = NATIVE_VALUE.get.call(el);
+    const iso = NATIVE_VALUE.get.call(el), bad = el.getAttribute('aria-invalid');
     el.type = 'text'; el.classList.add('date'); el.inputMode = 'numeric'; el.placeholder = 'TT.MM.JJJJ'; el.autocomplete = 'off'; el.maxLength = 10;
     Object.defineProperty(el, 'value', {
       configurable: true,
       get() { const raw = NATIVE_VALUE.get.call(this).trim(); if (!raw) return ''; return parseDateDE(raw) || raw; },
       set(v) { NATIVE_VALUE.set.call(this, isoToDE(v)); this.removeAttribute('aria-invalid'); }
     });
-    el.value = iso;
+    el.value = iso; if (bad) el.setAttribute('aria-invalid', bad);
     const w = document.createElement('span'); w.className = 'date-wrap';
     const b = document.createElement('button'); b.type = 'button'; b.className = 'icon cal'; b.textContent = '📅';
     b.setAttribute('aria-label', 'Kalender öffnen'); b.title = 'Kalender';
@@ -915,15 +919,16 @@ function acctFilterOptions(cur, withInactive = true) {
 const hasRates = a => !!a && (a.type === 'Save' || a.type === 'Oth T');
 const pctDE = r => (+r).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 3 }) + ' %';
 /* Zinssatz am Tag d aus dem Verlauf [{ from, rate }] */
+const rateOk = x => /^\d{4}-\d{2}-\d{2}$/.test(x.from || '') && x.rate !== '' && x.rate != null && !isNaN(x.rate);
 function rateAt(a, d = TODAY) {
   let r = null;
-  for (const x of (a.rates || []).slice().sort((p, q) => p.from.localeCompare(q.from))) if (x.from <= d) r = x.rate;
+  for (const x of (a.rates || []).filter(rateOk).sort((p, q) => p.from.localeCompare(q.from))) if (x.from <= d) r = x.rate;
   return r;
 }
 /* Zinsen eines Jahres, tagesgenau: Tagesendsaldo × gültiger Satz / Tage des Jahres.
    Bis heute mit den echten Buchungen, danach mit dem bekannten Saldo und den eingetragenen Sätzen (Hochrechnung). */
 function interestYear(a, year) {
-  if (!(a.rates || []).length) return null;
+  if (!(a.rates || []).some(rateOk)) return null;
   const leap = (y => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0)(+year), days = leap ? 366 : 365;
   const list = DB.tx.filter(t => t.acct === a.name && t.date.startsWith(year)).sort((p, q) => p.date.localeCompare(q.date));
   let bal = balance(a.name, `${+year - 1}-12-31`), i = 0, sofar = 0, total = 0;
@@ -942,15 +947,18 @@ const PAYOUT = { once: 'Einmalzahlung', monthly: 'Monatliche Rente' };
 function pensionValue(a) {
   const funds = ((a.pension || {}).funds || []).filter(f => f.units > 0);
   if (!funds.length) return null;
-  let value = 0, live = false, date = '';
+  let value = 0, live = false, date = '', n = 0;
   for (const f of funds) {
     const q = ((DB.securities || {})[f.isin] || {}).quote, qd = q && q.time ? String(q.time).slice(0, 10) : '';
     const useQ = q && q.price != null && q.currency === 'EUR' && (!f.date || qd >= f.date);
-    value += Math.round(f.units * (useQ ? q.price : f.price || 0) * 100);
+    if (!useQ && !(f.price > 0)) continue;                     // ohne Kurs nicht bewerten
+    n++;
+    value += Math.round(f.units * (useQ ? q.price : f.price) * 100);
     if (useQ) live = true;
     const d = useQ ? qd : f.date || ''; if (d > date) date = d;
   }
-  return { value, live, date, units: funds.reduce((x, f) => x + f.units, 0), n: funds.length };
+  if (!n) return null;
+  return { value, live, date, units: funds.reduce((x, f) => x + f.units, 0), n };
 }
 /* ---------- Prognose zum Auszahlungstag ----------
    Heutiges Fondsguthaben plus monatliche Beiträge bis zum Auszahlungstermin, monatlich verzinst mit einer
@@ -1112,9 +1120,11 @@ function showDialog() {
     const p = [...new Set(DB.tx.map(t => t.payee).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de'));
     $('#payeelist').innerHTML = p.map(x => `<option value="${esc(x)}">`).join('');
   }
+  if (TOAST_EL.parentNode === d) document.body.appendChild(TOAST_EL);   // sonst löscht das Neuzeichnen die Meldung
   d.innerHTML = ED.mode === 'tx' ? txForm() : ED.mode === 'rule' ? ruleForm() : ED.mode === 'contract' ? contractForm() : ED.mode === 'loan' ? loanForm() : ED.mode === 'inst' ? instForm() : ED.mode === 'fints' ? fintsForm() : ED.mode === 'prefs' ? prefsForm() : ED.mode === 'group' ? groupForm() : acctForm();
   enhanceDates(d);
   if (!d.open) d.showModal();
+  placeToast();
   const first = d.querySelector('[autofocus]'); if (first) first.focus();
   updateRest(); updateRulePreview(); updateContractPreview(); updateLoanPreview();
 }
@@ -1274,7 +1284,7 @@ function acctForm() {
     ${a ? `<p class="muted">${n} Buchungen. Beim Umbenennen werden alle Buchungen und Umbuchungen mit angepasst.</p>` : ''}
     ${a ? (loanOfAcct(a.name)
       ? `<div class="preview"><p>Dieses Konto wird als Kredit „${esc(loanOfAcct(a.name).name)}“ unter Kredite &amp; Schulden geführt.</p><div class="row"><button type="button" data-ed="unloan">Wieder als normales Konto führen</button></div></div>`
-      : `<div class="preview"><p>Ist das ein Darlehens- oder Kreditkonto? Dann verschiebe es zu Kredite &amp; Schulden. Es verschwindet aus den Konten und dem Gesamtsaldo und zählt stattdessen als Restschuld.</p><div class="row"><button type="button" data-ed="toloan">Zu Kredite &amp; Schulden verschieben</button></div></div>`) : ''}
+      : SAVE_TYPES.has(e.type) ? '' : `<div class="preview"><p>Ist das ein Darlehens- oder Kreditkonto? Dann verschiebe es zu Kredite &amp; Schulden. Es verschwindet aus den Konten und dem Gesamtsaldo und zählt stattdessen als Restschuld.</p><div class="row"><button type="button" data-ed="toloan">Zu Kredite &amp; Schulden verschieben</button></div></div>`) : ''}
     <div class="row spread ed-foot">
       <div class="row" id="ed-del-box">${a ? (n ? `<span class="muted">Konten mit Buchungen lassen sich nicht löschen. Setze das Konto stattdessen inaktiv.</span>` : '<button type="button" class="danger" data-ed="del">Konto löschen</button>') : ''}</div>
       <div class="row"><button type="button" data-ed="close">Abbrechen</button><button type="submit" class="primary">Speichern</button></div>
@@ -1295,9 +1305,10 @@ function acctExtras(e) {
   }
   if (e.type === 'Pens') {
     const p = e.pension;
-    return `<div class="splits"><h3>Auszahlung</h3>
+    const miss = pensionMissing(p);
+    return `${miss.length ? `<p class="missing-note">Noch offen: ${esc(miss.join(', '))}. Speichern geht trotzdem; die rot markierten Felder kannst du später ergänzen.</p>` : ''}<div class="splits"><h3>Auszahlung</h3>
       <div class="form" style="padding-top:0">
-        <label class="field"><span>Auszahlungstermin</span><input type="date" id="pe-date" value="${esc(p.date)}"></label>
+        <label class="field"><span>Auszahlungstermin</span><input type="date" id="pe-date" value="${esc(p.date)}" ${p.date ? '' : 'aria-invalid="true"'}></label>
         <label class="field"><span>Art der Auszahlung</span><select id="pe-kind">${Object.entries(PAYOUT).map(([k, l]) => `<option value="${k}" ${k === p.kind ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
         <label class="field"><span>${p.kind === 'monthly' ? 'Rente im Monat in €' : 'Erwarteter Betrag in €'}</span><input type="text" id="pe-amount" inputmode="decimal" value="${p.amount ? amtDE(p.amount) : ''}" placeholder="optional"></label>
       </div>
@@ -1305,6 +1316,22 @@ function acctExtras(e) {
     ${pensionFundsForm(e)}${pensionPayForm(e)}${pensionForecastForm(e)}`;
   }
   return '';
+}
+/* Was beim Rentenkonto noch fehlt (Hinweis, kein Hindernis beim Speichern) */
+const ISIN_RE = /^[A-Z]{2}[A-Z0-9]{9}\d$/;
+const hasQuote = isin => { const q = ((DB.securities || {})[isin] || {}).quote; return !!(q && q.price != null); };
+const unitsMissing = f => f.units === '' || f.units == null || isNaN(f.units) || !(f.units > 0);
+const priceMissing = f => !(f.price > 0) && !(ISIN_RE.test(f.isin || '') && hasQuote(f.isin)) && !ISIN_RE.test(f.isin || '');
+function pensionMissing(p) {
+  const out = [], label = f => `„${f.name || f.isin || 'Fonds'}“`;
+  if (!p.date) out.push('Auszahlungstermin');
+  for (const f of p.funds || []) {
+    if (!f.name && !f.isin && unitsMissing(f) && !(f.price > 0)) continue;   // leere Zeile
+    if (unitsMissing(f)) out.push('Anteile bei ' + label(f));
+    if (f.isin && !ISIN_RE.test(f.isin)) out.push('gültige ISIN bei ' + label(f));
+    else if (priceMissing(f)) out.push('Kurs oder ISIN bei ' + label(f));
+  }
+  return out;
 }
 /* Fondsanteile von Hand, z. B. aus der jährlichen Mitteilung des Versicherers */
 function pensionFundsForm(e) {
@@ -1314,9 +1341,9 @@ function pensionFundsForm(e) {
     <p class="muted">Trage die Anteile aus der jährlichen Mitteilung ein. Ist eine ISIN angegeben, holt der Kontor-Server den aktuellen Kurs (nur die ISIN wird übertragen); bis dahin gilt dein Kurs.</p>
     ${fs.length ? `<div class="table-wrap"><table class="rates"><thead><tr><th>Fonds</th><th>ISIN</th><th>Anteile</th><th>Kurs in €</th><th>Stand</th><th></th></tr></thead><tbody>
     ${fs.map((f, i) => `<tr><td><input type="text" id="pf-name-${i}" value="${esc(f.name || '')}" placeholder="Name des Fonds" aria-label="Fonds, Zeile ${i + 1}"></td>
-      <td><input type="text" id="pf-isin-${i}" value="${esc(f.isin || '')}" placeholder="LU…" style="min-width:130px" aria-label="ISIN, Zeile ${i + 1}"></td>
-      <td><input type="text" id="pf-units-${i}" inputmode="decimal" value="${num(f.units, 6)}" style="min-width:90px" aria-label="Anteile, Zeile ${i + 1}"></td>
-      <td><input type="text" id="pf-price-${i}" inputmode="decimal" value="${num(f.price, 4)}" style="min-width:80px" aria-label="Kurs, Zeile ${i + 1}"></td>
+      <td><input type="text" id="pf-isin-${i}" value="${esc(f.isin || '')}" placeholder="LU…" style="min-width:130px" aria-label="ISIN, Zeile ${i + 1}" ${f.isin && !ISIN_RE.test(f.isin) ? 'aria-invalid="true"' : ''}></td>
+      <td><input type="text" id="pf-units-${i}" inputmode="decimal" value="${num(f.units, 6)}" style="min-width:90px" aria-label="Anteile, Zeile ${i + 1}" ${unitsMissing(f) ? 'aria-invalid="true" placeholder="fehlt"' : ''}></td>
+      <td><input type="text" id="pf-price-${i}" inputmode="decimal" value="${num(f.price, 4)}" style="min-width:80px" aria-label="Kurs, Zeile ${i + 1}" ${priceMissing(f) ? 'aria-invalid="true" placeholder="fehlt"' : ISIN_RE.test(f.isin || '') && !(f.price > 0) ? 'placeholder="per ISIN"' : ''}></td>
       <td><input type="date" id="pf-date-${i}" value="${esc(f.date || '')}" aria-label="Stand, Zeile ${i + 1}"></td>
       <td><button type="button" class="icon" data-ed="rmfund" data-i="${i}" aria-label="Zeile entfernen">✕</button></td></tr>`).join('')}</tbody></table></div>` : ''}
     <div><button type="button" data-ed="addfund">+ Fonds hinzufügen</button></div></div>`;
@@ -1405,24 +1432,28 @@ function saveAcct() {
   readAcct();
   const e = ED, name = e.name.trim(), type = e.type, inst = e.institute || '';
   if (!name) return toast('Bitte einen Namen eingeben.');
+  // Unvollständige oder unlesbare Angaben verhindern das Speichern nicht; sie werden gemerkt und danach genannt
   let rates = null, pension = null;
+  const warn = [], numOrNull = x => x === '' || x == null || isNaN(x) || x < 0 ? null : +x;
   if (type === 'Save' || type === 'Oth T') {
     const rs = e.rates.filter(r => r.from || r.rate !== '');
-    if (rs.some(r => !/^\d{4}-\d{2}-\d{2}$/.test(r.from) || r.rate === '' || isNaN(r.rate) || r.rate < -5 || r.rate > 30)) return toast('Jeder Zinssatz braucht ein Datum und einen Satz in Prozent, z. B. 2,25.');
-    if (new Set(rs.map(r => r.from)).size < rs.length) return toast('Zwei Zinssätze haben dasselbe Datum.');
-    rates = rs.sort((p, q) => p.from.localeCompare(q.from));
+    const bad = rs.filter(r => !rateOk(r) || r.rate < -5 || r.rate > 30).length;
+    if (bad) warn.push(`${bad} ${bad === 1 ? 'Zinssatz ist' : 'Zinssätze sind'} unvollständig (Datum und Satz in %, z. B. 2,25)`);
+    if (new Set(rs.filter(rateOk).map(r => r.from)).size < rs.filter(rateOk).length) warn.push('zwei Zinssätze haben dasselbe Datum');
+    rates = rs.map(r => ({ from: r.from || '', rate: r.rate === '' || isNaN(r.rate) ? '' : +r.rate })).sort((p, q) => (p.from || '9').localeCompare(q.from || '9'));
   }
   if (type === 'Pens') {
-    if (isNaN(e.pension.amount)) return toast('Betrag der Auszahlung nicht lesbar.');
-    const fs = e.pension.funds.filter(f => f.name || f.isin || f.units !== '' || f.price !== '');
-    if (fs.some(f => f.units === '' || isNaN(f.units) || f.units < 0 || (f.price !== '' && (isNaN(f.price) || f.price < 0)))) return toast('Bitte bei jedem Fonds die Anteile als Zahl eintragen, z. B. 110,3282.');
-    if (fs.some(f => f.isin && !/^[A-Z]{2}[A-Z0-9]{9}\d$/.test(f.isin))) return toast('Eine ISIN hat 12 Zeichen, z. B. LU0309483781.');
-    const gr = e.pension.growth || FC_DEFAULT;
-    if (gr.some(x => x === '' || isNaN(x) || x < -20 || x > 30)) return toast('Bitte für die Wertentwicklung drei Prozentsätze eintragen, z. B. 2, 5 und 7.');
-    if (Number.isNaN(e.pension.contrib) || Number.isNaN(e.pension.factor) || e.pension.factor < 0) return toast('Beitrag oder Rentenfaktor nicht lesbar.');
-    pension = { date: e.pension.date || '', kind: e.pension.kind, amount: e.pension.amount || 0, contract: e.pension.contract || '',
-      growth: gr.map(Number), contrib: e.pension.contrib === '' ? '' : e.pension.contrib, factor: e.pension.factor === '' ? '' : e.pension.factor,
-      funds: fs.map(f => ({ name: f.name || f.isin, isin: f.isin, units: +f.units, price: f.price === '' ? 0 : +f.price, date: f.date || '' })) };
+    if (isNaN(e.pension.amount)) warn.push('der Betrag der Auszahlung war nicht lesbar und wurde leer gelassen');
+    const fs = e.pension.funds.filter(f => f.name || f.isin || (f.units !== '' && f.units != null) || (f.price !== '' && f.price != null));
+    const gr0 = e.pension.growth || FC_DEFAULT, gr = gr0.map((x, i) => x === '' || isNaN(x) || x < -20 || x > 30 ? FC_DEFAULT[i] : +x);
+    if (gr.some((x, i) => x !== +gr0[i])) warn.push('unlesbare Wertentwicklung durch 2/5/7 % ersetzt');
+    if (Number.isNaN(e.pension.contrib)) warn.push('der Beitrag im Monat war nicht lesbar, Kontor rechnet mit den Beiträgen');
+    if (Number.isNaN(e.pension.factor) || e.pension.factor < 0) warn.push('der Rentenfaktor war nicht lesbar und wurde leer gelassen');
+    pension = { date: e.pension.date || '', kind: e.pension.kind, amount: isNaN(e.pension.amount) ? 0 : e.pension.amount || 0, contract: e.pension.contract || '',
+      growth: gr, contrib: e.pension.contrib === '' || Number.isNaN(e.pension.contrib) ? '' : e.pension.contrib,
+      factor: e.pension.factor === '' || Number.isNaN(e.pension.factor) || e.pension.factor < 0 ? '' : e.pension.factor,
+      funds: fs.map(f => ({ name: f.name || f.isin, isin: f.isin || '', units: numOrNull(f.units), price: numOrNull(f.price), date: f.date || '' })) };
+    warn.push(...pensionMissing(pension));
   }
   if (name !== e.orig && DB.accounts[name]) return toast('Ein Konto mit diesem Namen gibt es schon.');
   if (!e.orig) {
@@ -1434,7 +1465,10 @@ function saveAcct() {
   }
   if (rates) DB.accounts[name].rates = rates;
   if (pension) DB.accounts[name].pension = pension;
-  save(); closeDialog(); render(); toast(e.orig ? 'Konto gespeichert.' : `Konto „${name}“ angelegt.`);
+  save(); closeDialog(); render();
+  const done = e.orig ? 'Konto gespeichert.' : `Konto „${name}“ angelegt.`;
+  if (warn.length) toast(`${done} Noch offen: ${warn.join('; ')}.`, { label: 'Ergänzen', run: () => openAcct(name) }, 12000);
+  else toast(done);
 }
 /* Eigene Kontogruppe anlegen oder bearbeiten */
 function openGroup(id) {
@@ -3465,11 +3499,14 @@ Views.uebersicht = () => {
   const total = accts.reduce((s, a) => s + balance(a.name), 0);
   const rate = sumIn ? Math.round((sumIn - sumOut) / sumIn * 100) : 0;
   const unc = DB.tx.filter(t => act.has(t.acct) && isUncategorized(t)).length;
-  const missingOpening = accts.filter(a => !a.opening && DB.tx.some(t => t.acct === a.name)).length;
+  // Anfangssaldo fehlt nur, wenn weder ein Bankstand eingetragen noch das Konto gesperrt ist (0 € kann richtig sein)
+  const openMiss = accts.filter(a => !a.opening && !a.bank && !a.locked && DB.tx.some(t => t.acct === a.name)).map(a => a.name);
+  const openKey = openMiss.join('|'), openHidden = (() => { try { return localStorage.getItem('kontor-hinweis-anfangssaldo') === openKey; } catch (err) { return false; } })();
+  const missingOpening = openHidden ? 0 : openMiss.length;
   return `
     <div class="row spread"><h1>Übersicht</h1>
       <label class="row">Jahr <select id="year">${ys.map(y => `<option ${y === UI.year ? 'selected' : ''}>${y}</option>`).join('')}</select></label></div>
-    ${missingOpening ? `<div class="notice">Bei ${missingOpening} Konten fehlt der Anfangssaldo, daher stimmen die Kontostände noch nicht. <a href="#konten">Jetzt eintragen</a></div>` : ''}
+    ${missingOpening ? `<div class="notice"><button type="button" class="x" data-dismiss-open="${esc(openKey)}" aria-label="Hinweis ausblenden" title="Ausblenden, bis sich etwas ändert">✕</button>Bei ${missingOpening === 1 ? 'einem Konto' : missingOpening + ' Konten'} fehlt der Anfangssaldo (${esc(openMiss.join(', '))}), daher stimmen die Kontostände noch nicht. <a href="#konten">Jetzt eintragen</a></div>` : ''}
     ${contractAlerts().sort((a, b) => a.i.daysLeft - b.i.daysLeft).map(({ c, i }) => `<div class="notice ${i.level === 'crit' ? 'crit' : ''}">Kündigungsfrist: <b>${esc(c.name)}</b> kündigen bis ${dDE(i.deadline)} (${i.daysLeft === 0 ? 'heute' : 'in ' + i.daysLeft + ' Tagen'}). <a href="#vertraege">Zu den Verträgen</a></div>`).join('')}
     <div class="kpis">
       <div class="kpi"><div class="label">Gesamtsaldo heute</div><div class="value num ${moneyCls(total)}">${money(total)}</div></div>
@@ -4522,8 +4559,11 @@ function commitImport() {
 
 /* ---------- Oberfläche ---------- */
 let toastTimer;
+/* Ein modaler Dialog liegt über allem; die Meldung muss dann in den Dialog, sonst bleibt sie unsichtbar dahinter */
+const TOAST_EL = document.getElementById('toast');
+function placeToast() { const d = $('#dlg'), host = d && d.open ? d : document.body; if (TOAST_EL.parentNode !== host) host.appendChild(TOAST_EL); }
 function toast(msg, action, ms = 5000) {
-  const el = $('#toast');
+  const el = TOAST_EL; placeToast();
   const actions = action ? [].concat(action) : [];
   el.innerHTML = `<span>${esc(msg)}</span>` + actions.map(a => `<button type="button">${esc(a.label)}</button>`).join('');
   el.querySelectorAll('button').forEach((b, i) => b.onclick = () => { el.hidden = true; actions[i].run(); });
@@ -4729,7 +4769,7 @@ document.addEventListener('click', e => {
   } else c.checked ? UI.sel.add(id) : UI.sel.delete(id);
   UI.lastSel = id; render();
 });
-$('#dlg').addEventListener('close', () => { Fints.stop(); ED = null; });
+$('#dlg').addEventListener('close', () => { placeToast(); Fints.stop(); ED = null; });
 
 function editorClick(t) {
   const a = t.dataset.ed;
@@ -4841,6 +4881,7 @@ document.addEventListener('click', e => {
     try { localStorage.setItem(CHART_HIDE_KEY, JSON.stringify([...chartHidden])); } catch (e) { }
     return render();
   }
+  if (t.dataset.dismissOpen !== undefined) { try { localStorage.setItem('kontor-hinweis-anfangssaldo', t.dataset.dismissOpen); } catch (err) { } return render(); }
   if (t.id === 'sel-clear') { UI.sel.clear(); return render(); }
   if (t.id === 'sel-tagadd') {
     const g = $('#sel-tag').value.trim();
