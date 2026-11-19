@@ -1,5 +1,7 @@
 # Kontor für Unraid: App + Datenablage + FinTS-Abruf
 FROM python:3.12-slim
+LABEL net.unraid.docker.icon="https://raw.githubusercontent.com/wumonline/kontor/main/unraid/kontor.png" \
+      org.opencontainers.image.title="Kontor"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -14,7 +16,7 @@ RUN pip install --no-cache-dir -r server/requirements.txt
 
 COPY VERSION VERSION
 COPY server/ server/
-COPY app/index.html app/index.html
+COPY app/ app/
 
 # Unraid-Standard: nobody (99) / users (100), damit die Dateien in appdata normal bearbeitbar bleiben
 RUN useradd -u 99 -g 100 -M -d /srv -s /usr/sbin/nologin finanz 2>/dev/null || true \

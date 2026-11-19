@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kontor</title>
+<link rel="icon" type="image/svg+xml" href="logo.svg">
+<link rel="apple-touch-icon" href="logo-180.png">
+<meta name="theme-color" content="#1f9e8a">
 <style>
 /* Layout: feste Navigationsleiste links (auf dem Handy oben), rechts die jeweilige Ansicht.
    Keine externen Schriften oder Skripte: eine Finanz-App soll keine Anfragen ins Internet schicken. */
@@ -37,8 +40,12 @@ html { font-size: var(--fs, 14px); }
 body { background: var(--bg); color: var(--fg); font: 1rem/1.5 var(--font); }
 .app { display: grid; grid-template-columns: 210px minmax(0, 1fr); min-height: 100vh; }
 .nav { background: var(--surface); border-right: 1px solid var(--line); padding: 20px 12px; display: flex; flex-direction: column; gap: 18px; position: sticky; top: 0; height: 100vh; }
-.brand { font-weight: 700; font-size: 1.214rem; padding: 0 8px; }
-.brand small { font-weight: 500; color: var(--muted); font-size: 0.857rem; margin-left: 4px; }
+.brand { display: flex; align-items: center; gap: 9px; padding: 0 8px; }
+.brand .logo { width: 30px; height: 30px; flex: none; }
+.brand .wm { font-weight: 700; font-size: 1.36rem; letter-spacing: -0.01em; line-height: 1; color: var(--fg); white-space: nowrap; }
+.brand .wm svg { width: 0.6em; height: 0.6em; margin: 0 0.02em; vertical-align: -0.02em; }
+.brand .wm .r1 { stroke: var(--accent); } .brand .wm .r2 { stroke: #7fd3c4; }
+.brand small { font-weight: 500; color: var(--muted); font-size: 0.857rem; padding-top: 5px; }
 .nav nav { display: flex; flex-direction: column; gap: 2px; }
 .nav a { color: var(--fg); text-decoration: none; padding: 7px 10px; border-radius: 6px; }
 .nav a:hover { background: var(--bg); }
@@ -288,7 +295,7 @@ button.clip { border: 0; background: none; padding: 0 2px; color: var(--muted); 
 <body>
 <div class="app">
   <aside class="nav">
-    <div class="brand">Kontor<small id="brand-ver"></small></div>
+    <div class="brand"><img class="logo" src="logo.svg" alt=""><span class="wm" role="img" aria-label="Kontor">k<svg viewBox="0 0 20 20" aria-hidden="true"><circle class="r1" cx="10" cy="10" r="7.5" fill="none" stroke-width="5"/><path class="r2" d="M10 2.5 A7.5 7.5 0 0 1 17.1 12.4" fill="none" stroke-width="5"/></svg>ntor</span><small id="brand-ver"></small></div>
     <nav id="nav">
       <a href="#uebersicht">Übersicht</a>
       <a href="#geldfluss">Geldfluss</a>
