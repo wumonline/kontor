@@ -834,11 +834,10 @@ const QIF = {
         }
       }
       else if (section && TXSEC.test(section)) {
-        if (!acct) res.problems.push(`Zeile ${no}: Buchung ohne Konto`);
-        else if (!rec.D) res.problems.push(`Zeile ${no}: Buchung ohne Datum`);
+        if (!rec.D) res.problems.push(`Zeile ${no}: Buchung ohne Datum`);
         else try {
           const amount = QIF.amount(rec.T ?? rec.U ?? '0');
-          const t = Object.assign({ acct, rawDate: rec.D, amount, payee: (rec.P || '').trim(), memo: (rec.M || '').trim(), number: (rec.N || '').trim(), cleared: (rec.C || '').trim(), splits: [], line: no }, QIF.cat(rec.L));
+          const t = Object.assign({ acct: acct || '', orphan: !acct, rawDate: rec.D, amount, payee: (rec.P || '').trim(), memo: (rec.M || '').trim(), number: (rec.N || '').trim(), cleared: (rec.C || '').trim(), splits: [], line: no }, QIF.cat(rec.L));
           if (splits.length) {
             t.splits = splits.map(s => Object.assign({ memo: (s.E || '').trim(), amount: QIF.amount(s.$ || '0') }, QIF.cat(s.S)));
             const sum = t.splits.reduce((a, s) => a + s.amount, 0);
@@ -846,6 +845,8 @@ const QIF = {
             // Bei Splits wiederholt Quicken in L nur die erste Teilkategorie; maßgeblich sind die Splits.
             t.category = ''; t.transfer = null; t.cls = t.cls || '';
           }
+          // Einzelkonto-Export: Quicken bucht den Eröffnungssaldo auf das Konto selbst, z. B. L[ING Konto]
+          if (t.orphan && t.transfer && !res.selfName && /^(er[öo]ffnungssaldo|opening balance|anfangssaldo)$/i.test(t.payee)) res.selfName = t.transfer;
           res.tx.push(t);
         } catch (e) { res.problems.push(`Zeile ${no}: ${e.message}`); }
       }
@@ -4647,25 +4648,39 @@ Views.import = () => {
   if (p) {
     const r = p.parsed;
     const per = {};
-    for (const t of r.tx) { const a = per[t.acct] = per[t.acct] || { n: 0, dup: 0, min: t.date, max: t.date, sum: 0, splits: 0 }; a.n++; if (t.dup) a.dup++; a.min = t.date < a.min ? t.date : a.min; a.max = t.date > a.max ? t.date : a.max; a.sum += t.amount; if (t.splits.length) a.splits++; }
-    const newCount = r.tx.filter(t => !t.dup).length;
+    for (const t of r.tx) { if (!t.acct) continue; const a = per[t.acct] = per[t.acct] || { n: 0, dup: 0, min: t.date, max: t.date, sum: 0, splits: 0 }; a.n++; if (qifSkip(r, t)) a.dup++; a.min = t.date < a.min ? t.date : a.min; a.max = t.date > a.max ? t.date : a.max; a.sum += t.amount; if (t.splits.length) a.splits++; }
+    const newCount = r.tx.filter(t => !qifSkip(r, t)).length, keyDup = r.tx.filter(t => t.dup === 'key').length, near = r.tx.filter(t => t.dup === 'near');
+    const byId = new Map(DB.tx.map(x => [x.id, x]));
+    const adjust = [...new Set(r.tx.filter(t => !qifSkip(r, t)).map(t => t.acct))].map(n => DB.accounts[n]).filter(a => a && a.bank && balance(a.name, a.bank.date) === a.bank.amount);
+    const targetSel = r.orphanCount ? `<div class="notice"><label class="field"><span>Die Datei enthält ein einzelnes Konto ohne Namen (Export eines Kontos aus Quicken). In welches Konto gehören die ${r.orphanCount} Buchungen?</span>
+        <select id="imp-target" ${r.target ? '' : 'aria-invalid="true"'}><option value="">Konto wählen …</option>
+        ${r.selfName && !DB.accounts[r.selfName] ? `<option value="${esc(r.selfName)}" ${r.target === r.selfName ? 'selected' : ''}>Neues Konto „${esc(r.selfName)}“</option>` : ''}
+        ${Object.values(DB.accounts).sort((a, b) => a.name.localeCompare(b.name, 'de')).map(a => `<option value="${esc(a.name)}" ${r.target === a.name ? 'selected' : ''}>${esc(a.name)}${a.inactive ? ' (inaktiv)' : ''}</option>`).join('')}
+        </select></label>${r.selfName ? `<span class="muted">Erkannt am Eröffnungssaldo: „${esc(r.selfName)}“.</span>` : ''}</div>` : '';
     const skipped = Object.entries(r.skipped).filter(([k]) => !/^(Memorized)$/i.test(k));
     preview = `<div class="panel">
       <div class="row spread"><h2>Vorschau: ${esc(p.file)}</h2><span class="chip ${r.problems.length ? 'warn' : 'ok'}">${r.problems.length ? r.problems.length + ' Probleme' : 'Keine Fehler'}</span></div>
       <p class="muted">${r.accounts.length} Konten, ${r.categories.length} Kategorien, ${r.classes.length} Klassen, ${r.tx.length} Buchungen. Datumsformat ${r.order === 'MDY' ? 'Monat.Tag.Jahr' : 'Tag.Monat.Jahr'}${r.guessed ? ' (erkannt)' : ' (laut Datei)'}.</p>
+      ${targetSel}
       <div class="table-wrap"><table><thead><tr><th>Konto</th><th>Typ</th><th class="r">Buchungen</th><th class="r">Neu</th><th>Zeitraum</th><th class="r">Summe</th></tr></thead><tbody>
       ${r.accounts.map(a => { const x = per[a.name]; return `<tr><td>${esc(a.name)}${DB.accounts[a.name] ? ' <span class="chip">vorhanden</span>' : ''}</td><td>${esc(acctType(a.type))}</td><td class="r num">${x ? x.n : 0}${x && x.splits ? `<span class="sub">${x.splits} Splits</span>` : ''}</td><td class="r num">${x ? x.n - x.dup : 0}</td><td class="num">${x ? dDE(x.min) + ' – ' + dDE(x.max) : '–'}</td><td class="r num ${x ? moneyCls(x.sum) : ''}">${x ? money(x.sum) : '–'}</td></tr>`; }).join('')}
       </tbody></table></div>
       ${r.problems.length ? `<details><summary>Probleme anzeigen</summary><ul>${r.problems.slice(0, 50).map(x => `<li>${esc(x)}</li>`).join('')}</ul></details>` : ''}
       ${skipped.length ? `<p class="notice">Nicht übernommen: ${skipped.map(([k, v]) => `${v} × ${esc(k)}`).join(', ')}. Wertpapierbuchungen kommen in einer späteren Version.</p>` : ''}
-      ${newCount < r.tx.length ? `<p class="muted">${r.tx.length - newCount} Buchungen sind schon vorhanden und werden übersprungen.</p>` : ''}
+      ${keyDup ? `<p class="muted">${keyDup} Buchungen sind schon importiert und werden übersprungen.</p>` : ''}
+      ${near.length ? `<div class="notice"><p>${near.length} ${near.length === 1 ? 'Buchung gibt' : 'Buchungen gibt'} es schon mit gleichem Betrag im selben Konto, höchstens 3 Tage daneben (z. B. aus CSV oder Online-Abruf). ${near.length === 1 ? (r.keepNear ? 'Sie wird trotzdem importiert.' : 'Sie wird übersprungen.') : (r.keepNear ? 'Sie werden trotzdem importiert.' : 'Sie werden übersprungen.')}</p>
+        <details><summary>Paare ansehen</summary><div class="table-wrap"><table><thead><tr><th>Datei</th><th>Schon vorhanden</th><th class="r">Betrag</th></tr></thead><tbody>
+        ${near.slice(0, 100).map(t => { const x = byId.get(t.near) || {}; return `<tr><td>${dDE(t.date)} ${esc((t.payee || t.memo || '').slice(0, 40))}</td><td>${x.date ? dDE(x.date) : ''} ${esc(displayPayee(x).slice(0, 40))}</td><td class="r num ${moneyCls(t.amount)}">${money(t.amount)}</td></tr>`; }).join('')}
+        </tbody></table></div></details>
+        <label><input type="checkbox" id="imp-keepnear" ${r.keepNear ? 'checked' : ''}> Trotzdem importieren</label></div>` : ''}
+      ${adjust.length ? `<p class="muted">Der Anfangssaldo von ${adjust.map(a => `„${esc(a.name)}“`).join(', ')} wird nach dem Import angepasst, damit der Stand laut Bank (${adjust.map(a => `${money(a.bank.amount)} am ${dDE(a.bank.date)}`).join(', ')}) weiter stimmt.</p>` : ''}
       ${(() => {
-        const tr = r.tx.filter(t => !t.dup && t.transfer && t.transfer !== t.acct);
+        const tr = r.tx.filter(t => !qifSkip(r, t) && t.transfer && t.transfer !== t.acct);
         const missing = tr.filter(t => !r.tx.some(o => o.acct === t.transfer && o.transfer === t.acct && o.amount === -t.amount && o.date === t.date)).length
-          + r.tx.filter(t => !t.dup).reduce((s, t) => s + t.splits.filter(x => x.transfer && x.transfer !== t.acct).length, 0);
+          + r.tx.filter(t => !qifSkip(r, t)).reduce((s, t) => s + t.splits.filter(x => x.transfer && x.transfer !== t.acct).length, 0);
         return missing ? `<p class="muted">${missing} Umbuchungen stehen nur in einem Konto. Quicken exportiert sie so. Die fehlenden Gegenbuchungen werden beim Import ergänzt.</p>` : '';
       })()}
-      <div class="row"><button class="primary" id="imp-go" ${newCount ? '' : 'disabled'}>${newCount} Buchungen importieren</button><button id="imp-cancel">Abbrechen</button></div>
+      <div class="row"><button class="primary" id="imp-go" ${newCount ? '' : 'disabled'}>${r.tx.some(t => !t.acct) ? 'Erst Zielkonto wählen' : `${newCount} Buchungen importieren`}</button><button id="imp-cancel">Abbrechen</button></div>
     </div>`;
   }
   return `<h1>Import</h1>${uploadAskPanel()}${receiptPanel()}${dropPanel()}
@@ -4836,27 +4851,61 @@ function readFiles(list) {
 function importText(text, fileName) {
   if (!/^\s*!/.test(text)) { toast('Das sieht nicht nach einer QIF-Datei aus.'); return; }
   const parsed = QIF.parse(text);
-  const existing = new Set(DB.tx.map(t => t.key)), occ = {};
-  for (const t of parsed.tx) {
-    const base = [t.acct, t.date, t.amount, t.payee, t.memo, t.number].join('|');
-    occ[base] = (occ[base] || 0) + 1;
-    t.key = base + '#' + occ[base];
-    t.dup = existing.has(t.key);
-  }
-  for (const t of parsed.tx) if (!parsed.accounts.some(a => a.name === t.acct)) parsed.accounts.push({ name: t.acct, type: '', desc: '' });
+  parsed.orphanCount = parsed.tx.filter(t => t.orphan).length;
+  if (parsed.orphanCount) parsed.target = parsed.selfName || '';
+  parsed.fileAccounts = parsed.accounts.slice();
+  qifPrepare(parsed);
   UI.pending = { file: fileName, parsed };
   location.hash === '#import' ? render() : (location.hash = 'import');
   return parsed;
 }
+/* Buchungen ohne Konto dem gewählten Zielkonto zuordnen, Schlüssel bilden und Doppel suchen:
+   'key' = genau diese Buchung ist schon importiert; 'near' = gleicher Betrag im selben Konto höchstens 3 Tage daneben
+   (z. B. schon per CSV oder Online-Abruf da). Erzeugte Gegenbuchungen zählen nicht, die gleicht dedupeTransfers ab. */
+function qifPrepare(r) {
+  for (const t of r.tx) {
+    if (!t.orphan) continue;
+    if (t.transfer0 === undefined) t.transfer0 = t.transfer;
+    t.acct = r.target || '';
+    t.transfer = r.selfName && t.transfer0 === r.selfName && t.acct ? t.acct : t.transfer0;
+  }
+  r.accounts = r.fileAccounts.slice();
+  for (const t of r.tx) if (t.acct && !r.accounts.some(a => a.name === t.acct)) r.accounts.push({ name: t.acct, type: t.orphan ? 'Bank' : '', desc: '' });
+  const byKey = new Map(DB.tx.map(x => [x.key, x])), occ = {}, used = new Set();
+  for (const t of r.tx) {
+    const base = [t.acct, t.date, t.amount, t.payee, t.memo, t.number].join('|');
+    occ[base] = (occ[base] || 0) + 1;
+    t.key = base + '#' + occ[base];
+    const hit = t.acct && byKey.get(t.key);
+    t.dup = hit ? 'key' : false; t.near = null;
+    if (hit) used.add(hit.id);
+  }
+  const pool = {};
+  for (const x of DB.tx) if (!x.gen) (pool[x.acct + '|' + x.amount] = pool[x.acct + '|' + x.amount] || []).push(x);
+  for (const t of r.tx) {
+    if (t.dup || !t.acct || !t.amount) continue;
+    let best = null, bd = 99;
+    for (const x of pool[t.acct + '|' + t.amount] || []) {
+      if (used.has(x.id)) continue;
+      const d = Math.abs(daysBetween(x.date, t.date)); if (d <= 3 && d < bd) { best = x; bd = d; }
+    }
+    if (best) { used.add(best.id); t.dup = 'near'; t.near = best.id; }
+  }
+}
+const qifSkip = (r, t) => !t.acct || t.dup === 'key' || (t.dup === 'near' && !r.keepNear);
 function commitImport() {
   const p = UI.pending; if (!p) return;
   const r = p.parsed, impId = 'i' + Date.now();
+  if (r.tx.some(t => !t.acct)) return toast('Bitte zuerst das Zielkonto wählen.');
+  // Konten, deren Stand laut Bank vor dem Import stimmt: Startbetrag danach so anpassen, dass er weiter stimmt
+  const keep = [...new Set(r.tx.filter(t => !qifSkip(r, t)).map(t => t.acct))].map(n => DB.accounts[n])
+    .filter(a => a && a.bank && balance(a.name, a.bank.date) === a.bank.amount);
   for (const a of r.accounts) if (!DB.accounts[a.name]) DB.accounts[a.name] = { name: a.name, type: a.type, desc: a.desc, opening: 0 };
   for (const c of r.categories) if (!DB.categories[c.name]) DB.categories[c.name] = { name: c.name, income: c.income, desc: c.desc };
   DB.classes = [...new Set([...DB.classes, ...r.classes])];
   let n = 0; const added = [];
   for (const t of r.tx) {
-    if (t.dup) continue;
+    if (qifSkip(r, t)) continue;
     const nt = { id: ++DB.seq, imp: impId, key: t.key, acct: t.acct, date: t.date, amount: t.amount, payee: t.payee, memo: t.memo, number: t.number, cleared: t.cleared, category: t.category, cls: t.cls, transfer: t.transfer, splits: t.splits.map(s => ({ category: s.category, cls: s.cls, transfer: s.transfer, memo: s.memo, amount: s.amount })) };
     DB.tx.push(nt); added.push(nt);
     n++;
@@ -4868,8 +4917,9 @@ function commitImport() {
   DB.tx.sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
   DB.imports.push({ id: impId, file: p.file, date: new Date().toISOString(), count: n + gen });
   UI.pending = null; UI.year = null;
-  const merged = dedupeTransfers(DB);
-  if (save()) toast(`${n} Buchungen importiert${gen ? `, ${gen} fehlende Gegenbuchungen von Umbuchungen ergänzt` : ''}${merged ? `, ${merged} mit vorhandenen Buchungen abgeglichen` : ''}${ruled ? `, ${ruled} per Regel zugeordnet` : ''}.`, null, 9000);
+  const merged = dedupeTransfers(DB), moved = [];
+  for (const a of keep) { const d = a.bank.amount - balance(a.name, a.bank.date); if (d) { a.opening = (a.opening || 0) + d; moved.push(`„${a.name}“ ${money(a.opening)}`); } }
+  if (save()) toast(`${n} Buchungen importiert${moved.length ? `, Anfangssaldo angepasst (${moved.join(', ')}), damit der Stand laut Bank weiter stimmt` : ''}${gen ? `, ${gen} fehlende Gegenbuchungen von Umbuchungen ergänzt` : ''}${merged ? `, ${merged} mit vorhandenen Buchungen abgeglichen` : ''}${ruled ? `, ${ruled} per Regel zugeordnet` : ''}.`, null, 9000);
   location.hash = 'uebersicht';
 }
 
@@ -4965,6 +5015,8 @@ document.addEventListener('change', e => {
   else if (t.id === 'csv-fixopen') { UI.csv.fixOpen = t.checked; }
   else if (t.id === 'csv-archive') { UI.csv.archive = t.checked; }
   else if (t.id === 'restore' && t.files[0]) restoreBackup(t.files[0]);
+  else if (t.id === 'imp-target' && UI.pending) { UI.pending.parsed.target = t.value; qifPrepare(UI.pending.parsed); render(); }
+  else if (t.id === 'imp-keepnear' && UI.pending) { UI.pending.parsed.keepNear = t.checked; render(); }
   else if (t.dataset.coexp) {
     const c = DB.contracts.find(x => x.id === t.dataset.coexp); if (!c) return;
     c.expired = t.checked; save(); render();
