@@ -252,6 +252,8 @@ tr.grp td.num { text-transform: none; letter-spacing: 0; color: var(--fg); }
 .rates td input { width: 100%; }
 .ed input[aria-invalid="true"] { border-color: var(--minus); background: var(--warn-soft); }
 .missing-note { color: var(--minus); font-size: 0.929rem; }
+.del-confirm { border: 1px solid var(--minus); border-radius: 8px; padding: 10px 14px; background: var(--warn-soft); max-width: 560px; }
+.del-confirm ul { margin: 6px 0 8px; padding-left: 20px; } .del-confirm p { margin: 4px 0; }
 .notice .x { float: right; margin: -2px -6px 0 12px; border: 0; background: none; color: var(--muted); font-size: 1.1rem; line-height: 1; padding: 2px 6px; cursor: pointer; }
 .notice .x:hover { color: var(--fg); }
 .date-wrap { display: inline-flex; gap: 4px; align-items: center; max-width: 100%; }
@@ -1298,7 +1300,7 @@ function acctForm() {
       ? `<div class="preview"><p>Dieses Konto wird als Kredit „${esc(loanOfAcct(a.name).name)}“ unter Kredite &amp; Schulden geführt.</p><div class="row"><button type="button" data-ed="unloan">Wieder als normales Konto führen</button></div></div>`
       : SAVE_TYPES.has(e.type) ? '' : `<div class="preview"><p>Ist das ein Darlehens- oder Kreditkonto? Dann verschiebe es zu Kredite &amp; Schulden. Es verschwindet aus den Konten und dem Gesamtsaldo und zählt stattdessen als Restschuld.</p><div class="row"><button type="button" data-ed="toloan">Zu Kredite &amp; Schulden verschieben</button></div></div>`) : ''}
     <div class="row spread ed-foot">
-      <div class="row" id="ed-del-box">${a ? (n ? `<span class="muted">Konten mit Buchungen lassen sich nicht löschen. Setze das Konto stattdessen inaktiv.</span>` : '<button type="button" class="danger" data-ed="del">Konto löschen</button>') : ''}</div>
+      <div class="row" id="ed-del-box">${a ? '<button type="button" class="danger" data-ed="del">Konto löschen</button>' : ''}</div>
       <div class="row"><button type="button" data-ed="close">Abbrechen</button><button type="submit" class="primary">Speichern</button></div>
     </div>
   </form>`;
@@ -1579,6 +1581,48 @@ function saveInst() {
   if (back) { back.institute = id; ED = back; showDialog(); }
   else { closeDialog(); render(); }
   toast(`${e.id ? 'Institut gespeichert' : `„${name}“ angelegt`}${n ? `, ${n} ${n === 1 ? 'Konto' : 'Konten'} zugeordnet` : ''}.`);
+}
+/* Was beim Löschen eines Kontos passiert (für die Sicherheitsabfrage) */
+function acctDeleteImpact(name) {
+  const own = DB.tx.filter(t => t.acct === name), ids = new Set(own.map(t => t.id));
+  const linked = DB.tx.filter(t => t.acct !== name && ((t.link && ids.has(t.link)) || t.transfer === name || (t.splits || []).some(x => x.transfer === name)));
+  return { own, gen: linked.filter(t => t.gen && ids.has(t.gen)), other: linked.filter(t => !(t.gen && ids.has(t.gen))),
+    loans: (DB.loans || []).filter(l => l.acct === name), rules: (DB.rules || []).filter(r => r.transfer === name || r.acct === name),
+    stmts: (DB.statements || []).filter(x => x.acct === name), groups: (DB.groups || []).filter(g => g.accts.includes(name)) };
+}
+/* Konto mit allen Buchungen löschen. Gegenbuchungen, die Kontor selbst erzeugt hat, gehen mit; echte Buchungen in anderen
+   Konten bleiben und stehen danach ohne Kategorie da. Liefert eine Kopie des vorherigen Stands zum Rückgängigmachen. */
+function deleteAccount(name) {
+  const snap = JSON.stringify(DB), im = acctDeleteImpact(name), gone = new Set([...im.own, ...im.gen].map(t => t.id));
+  for (const t of im.other) {
+    if (t.link && gone.has(t.link)) delete t.link;
+    if (t.transfer === name) { t.transfer = null; t.category = ''; }
+    for (const x of t.splits || []) if (x.transfer === name) x.transfer = null;
+  }
+  DB.tx = DB.tx.filter(t => !gone.has(t.id));
+  for (const l of im.loans) l.acct = '';
+  for (const r of im.rules) { if (r.transfer === name) r.transfer = ''; if (r.acct === name) r.acct = ''; }
+  for (const c of DB.contracts || []) if (c.acct === name) c.acct = '';
+  for (const g of DB.groups || []) g.accts = g.accts.filter(x => x !== name);
+  delete DB.accounts[name];
+  if (UI.f.acct === name) UI.f.acct = '';
+  return { snap, n: gone.size, freed: im.other.length };
+}
+function acctDeleteConfirm(name) {
+  const im = acctDeleteImpact(name), pl = (n, a, b) => `${n} ${n === 1 ? a : b}`;
+  const facts = [
+    im.own.length ? `${pl(im.own.length, 'Buchung', 'Buchungen')} in diesem Konto werden gelöscht${im.gen.length ? `, dazu ${pl(im.gen.length, 'erzeugte Gegenbuchung', 'erzeugte Gegenbuchungen')} in anderen Konten` : ''}` : 'Das Konto hat keine Buchungen',
+    im.other.length ? `${pl(im.other.length, 'Umbuchung', 'Umbuchungen')} in anderen Konten ${im.other.length === 1 ? 'bleibt' : 'bleiben'} erhalten und ${im.other.length === 1 ? 'steht' : 'stehen'} danach ohne Kategorie da` : '',
+    im.loans.length ? `der Kredit „${esc(im.loans[0].name)}“ verliert sein Kreditkonto` : '',
+    im.rules.length ? `${pl(im.rules.length, 'Regel', 'Regeln')} ${im.rules.length === 1 ? 'verweist' : 'verweisen'} auf das Konto und ${im.rules.length === 1 ? 'wird' : 'werden'} angepasst` : '',
+    im.stmts.length ? `${pl(im.stmts.length, 'abgelegter Kontoauszug bleibt', 'abgelegte Kontoauszüge bleiben')} auf dem Server` : ''].filter(Boolean);
+  return `<div class="del-confirm" role="alert">
+    <p><b>Konto „${esc(name)}“ endgültig löschen?</b></p>
+    <ul>${facts.map(f => `<li>${f}</li>`).join('')}</ul>
+    ${im.own.length ? `<p class="muted">Wenn du das Konto nur nicht mehr sehen willst, setze es besser inaktiv; dann bleiben alle Buchungen erhalten.</p>
+    <label class="field"><span>Zur Bestätigung den Kontonamen eintippen</span><input type="text" id="del-confirm-name" autocomplete="off" placeholder="${esc(name)}"></label>` : ''}
+    <div class="row"><button type="button" class="danger" data-ed="del-yes">Ja, endgültig löschen</button><button type="button" data-ed="del-no">Abbrechen</button></div>
+  </div>`;
 }
 function renameAccount(from, to) {
   const a = DB.accounts[from]; delete DB.accounts[from]; a.name = to; DB.accounts[to] = a;
@@ -5026,6 +5070,8 @@ function dialogChange(t) {
 document.addEventListener('submit', e => {
   if (e.target.id !== 'ed-form') return;
   e.preventDefault();
+  // Enter im Bestätigungsfeld fürs Löschen bestätigt das Löschen, nicht das Speichern
+  if (document.activeElement && document.activeElement.id === 'del-confirm-name') { const b = $('#dlg [data-ed="del-yes"]'); if (b) b.click(); return; }
   if (ED && ED.mode === 'tx') saveTx(); else if (ED && ED.mode === 'acct') saveAcct(); else if (ED && ED.mode === 'rule') saveRule(); else if (ED && ED.mode === 'contract') saveContract(); else if (ED && ED.mode === 'loan') saveLoan(); else if (ED && ED.mode === 'inst') saveInst(); else if (ED && ED.mode === 'fints') fintsSubmit(); else if (ED && ED.mode === 'group') saveGroup();
 });
 document.addEventListener('dblclick', e => {
@@ -5081,8 +5127,14 @@ function editorClick(t) {
     return;
   }
   if (ED.mode === 'acct') {
-    if (a === 'del') { $('#ed-del-box').innerHTML = '<span>Konto wirklich löschen?</span><button type="button" class="danger" data-ed="del-yes">Ja, löschen</button><button type="button" data-ed="del-no">Nein</button>'; }
-    else if (a === 'del-yes') { const n = ED.orig; delete DB.accounts[n]; for (const g of DB.groups) g.accts = g.accts.filter(x => x !== n); if (UI.f.acct === n) UI.f.acct = ''; save(); closeDialog(); render(); toast(`Konto „${n}“ gelöscht.`); }
+    if (a === 'del') { readAcct(); const box = $('#ed-del-box'); box.innerHTML = acctDeleteConfirm(ED.orig); const inp = $('#del-confirm-name'); (inp || box.querySelector('[data-ed="del-no"]')).focus(); }
+    else if (a === 'del-yes') {
+      const n = ED.orig, inp = $('#del-confirm-name');
+      if (inp && inp.value.trim() !== n) { inp.setAttribute('aria-invalid', 'true'); inp.focus(); return toast(`Bitte genau „${n}“ eintippen, dann wird gelöscht.`); }
+      const r = deleteAccount(n); save(); closeDialog(); render();
+      toast(`Konto „${n}“ gelöscht${r.n ? `, ${r.n} Buchungen entfernt` : ''}${r.freed ? `, ${r.freed} Umbuchungen in anderen Konten stehen jetzt ohne Kategorie da` : ''}.`,
+        { label: 'Rückgängig', run: () => { DB = JSON.parse(r.snap); save(); render(); toast(`Konto „${n}“ ist wieder da.`); } }, 15000);
+    }
     else if (a === 'del-no') showDialog();
     else if (a === 'toloan') { const n = ED.orig; acctToLoan(n); }
     else if (a === 'addrate') { readAcct(); const last = ED.rates[ED.rates.length - 1]; ED.rates.push({ from: TODAY, rate: last ? last.rate : '' }); showDialog(); const el = $('#rt-rate-' + (ED.rates.length - 1)); if (el) el.focus(); }
