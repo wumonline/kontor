@@ -174,6 +174,13 @@ select.mini { font-size: 0.857rem; padding: 2px 4px; margin-top: 4px; max-width:
 .field.wide { grid-column: 1 / -1; }
 .field.check { flex-direction: row; align-items: center; gap: 8px; }
 .field.check > span { font-weight: 400; font-size: 1rem; color: var(--fg); }
+.field textarea { width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; color: inherit; resize: vertical; }
+.contact-text { white-space: pre-line; }
+.contact-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.contact-grid > .panel { margin: 0; }
+.contact-card > div { margin-top: 4px; }
+details.contact summary { cursor: pointer; color: var(--accent, inherit); }
+details.contact > div { margin-top: 2px; }
 .field input[type="text"], .field select, .field input[type="date"] { width: 100%; background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
 .field input[type="color"] { width: 60px; height: 32px; padding: 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 dialog { border: 1px solid var(--line); border-radius: 12px; padding: 0; background: var(--surface); color: var(--fg); width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 32px); box-shadow: 0 20px 60px rgba(0,0,0,.35); }
@@ -311,6 +318,7 @@ button.clip { border: 0; background: none; padding: 0 2px; color: var(--muted); 
       <a href="#depot">Depot</a>
       <a href="#rente">Rentenverträge</a>
       <a href="#kredite">Kredite &amp; Schulden</a>
+      <a href="#kontakte">Kontakte</a>
       <a href="#import">Import <span class="badge" id="in-badge" hidden></span></a>
       <a href="#konten">Konten &amp; Daten</a>
     </nav>
@@ -331,6 +339,14 @@ button.clip { border: 0; background: none; padding: 0 2px; color: var(--muted); 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => Array.from(el.querySelectorAll(s));
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+/* Kontakttext: E-Mail-Adressen, Webseiten und Telefonnummern anklickbar machen (Text wird vorher maskiert) */
+function linkify(s) {
+  return esc(s).replace(/([\w.+-]+@[\w-]+(?:\.[\w-]+)+)|((?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:de|com|eu|net|org|lu|at|ch)(?:\/[^\s<]*)?)|(\+?\d[\d /-]{5,}\d)/gi, (m, mail, web, tel) => {
+    if (mail) return `<a href="mailto:${mail}">${mail}</a>`;
+    if (web) return `<a href="${/^https?:/i.test(web) ? web : 'https://' + web}" target="_blank" rel="noopener noreferrer">${web}</a>`;
+    return `<a href="tel:${tel.replace(/[^\d+]/g, '')}">${tel}</a>`;
+  });
+}
 const EUR = new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR' });
 const money = c => EUR.format((c || 0) / 100);
 const moneyCls = c => c < 0 ? 'neg' : c > 0 ? 'pos' : '';
@@ -626,6 +642,11 @@ function ensureModel(d) {
     d.splitFixV2 = true;
     if (n) { Store.save(d); setTimeout(() => toast(`${n} doppelte Gegenbuchungen aus Splitbuchungen entfernt.`, null, 8000), 600); }
   }
+  if (!d.trNullV1) {
+    // Trade-Republic-Export hängte „null“ an Texte an; schon importierte Buchungen einmalig bereinigen
+    for (const t of d.tx) if (/^(gen\|)?tr\|/.test(String(t.key || ''))) for (const f of ['payee', 'memo', 'payeeOrig']) if (typeof t[f] === 'string' && /null$/i.test(t[f])) t[f] = t[f].replace(/null$/i, '').trim();
+    d.trNullV1 = true;
+  }
   // Wertpapierangaben (ISIN, Stück) an Depotbuchungen, die vor dieser Funktion importiert wurden: aus dem Buchungstext lesen
   if (!d.secV1) {
     const depots = new Set(Object.values(d.accounts).filter(a => a.type === 'Port' || a.type === 'Invst').map(a => a.name));
@@ -660,7 +681,11 @@ function addCounterparts(d, txs) {
     for (const s of t.splits || []) if (s.transfer && s.transfer !== t.acct) parts.push({ to: s.transfer, amount: s.amount, split: true });
     for (const p of parts) {
       if (!p.split) {
-        const o = d.tx.find(x => x !== t && !x.link && x.acct === p.to && x.transfer === t.acct && x.amount === -p.amount && x.date === t.date);
+        // Gegenstück, das schon als Umbuchung auf dieses Konto markiert ist: gleicher Tag zuerst, sonst bis 5 Tage daneben
+        // (Quicken bucht die beiden Seiten einer Überweisung oft an verschiedenen Tagen)
+        const o = d.tx.find(x => x !== t && !x.link && x.acct === p.to && x.transfer === t.acct && x.amount === -p.amount && x.date === t.date)
+          || d.tx.filter(x => x !== t && !x.link && !x.gen && x.acct === p.to && x.transfer === t.acct && x.amount === -p.amount && dayDist(x.date, t.date) <= 5)
+            .sort((a, b) => dayDist(a.date, t.date) - dayDist(b.date, t.date))[0];
         if (o) { o.link = t.id; t.link = o.id; continue; }
       } else if (d.tx.some(x => x.acct === p.to && x.transfer === t.acct && x.amount === -p.amount && x.date === t.date && (x.gen === t.id || !x.link))) continue;
       if (!d.accounts[p.to]) d.accounts[p.to] = { name: p.to, type: 'Bank', opening: 0, desc: '', institute: '', iban: '', number: '', inactive: false };
@@ -1201,7 +1226,7 @@ function contractFromTx(e) {
   let interval = 'monthly';
   const gaps = hist.slice(1).map((t, i) => daysBetween(hist[i].date, t.date)).filter(d => d > 0).sort((a, b) => a - b);
   if (gaps.length) { const mg = gaps[Math.floor(gaps.length / 2)];
-    interval = mg <= 9 ? 'weekly' : mg <= 45 ? 'monthly' : mg <= 120 ? 'quarterly' : mg <= 250 ? 'halfyear' : 'yearly'; }
+    interval = mg <= 9 ? 'weekly' : mg <= 45 ? 'monthly' : mg <= 75 ? 'bimonthly' : mg <= 120 ? 'quarterly' : mg <= 250 ? 'halfyear' : 'yearly'; }
   const name = payee.replace(/\s+(a\.\s?G\.|AG|GmbH(\s?&\s?Co\.?\s?KG)?|SE|KG|e\.\s?V\.|mbH)\.?$/i, '').trim();
   return { name, match: payee, category: e.category || '', acct: e.acct, amount: e.amount || 0, interval, start: hist[0] ? hist[0].date : e.date };
 }
@@ -1530,12 +1555,31 @@ function groupsPanel() {
     <p class="muted">Nach Kontoart (Girokonten, Tagesgeld, Sparkonten …) gruppiert Kontor von selbst. Eigene Gruppen fassen beliebige Konten zusammen, z. B. „Gemeinsame Konten“ oder „Notgroschen“. Ein Konto darf in mehreren Gruppen stehen. Gruppen erscheinen in der Übersicht und als Filter bei den Buchungen.</p>
     ${rows ? `<div class="table-wrap"><table><tbody>${rows}</tbody></table></div>` : ''}</div>`;
 }
+/* Kontaktdaten eines Instituts: Feld → [Bezeichnung, Beispiel] */
+const CONTACT_FIELDS = {
+  address: ['Anschrift', 'Musterstraße 1, 12345 Musterstadt'], phone: ['Telefon (Service)', '0800 123456'],
+  block: ['Karte sperren', '116 116'], email: ['E-Mail', 'service@example.de'], web: ['Webseite', 'example.de'], note: ['Notiz', 'z. B. Ansprechpartner, Öffnungszeiten']
+};
+const emptyContact = () => Object.fromEntries(Object.keys(CONTACT_FIELDS).map(k => [k, '']));
+const hasContact = i => !!(i && i.contact && Object.values(i.contact).some(Boolean));
+/* Kontaktdaten als kompakte Zeilen, Telefon, E-Mail und Webseite anklickbar */
+function contactHtml(c) {
+  if (!c) return '';
+  const L = CONTACT_FIELDS, out = [];
+  if (c.address) out.push(`<div class="contact-text">${esc(c.address)}</div>`);
+  const line = [c.phone && `${L.phone[0]}: ${linkify(c.phone)}`, c.block && `${L.block[0]}: ${linkify(c.block)}`].filter(Boolean).join(' · ');
+  if (line) out.push(`<div>${line}</div>`);
+  const web = [c.email && linkify(c.email), c.web && linkify(c.web)].filter(Boolean).join(' · ');
+  if (web) out.push(`<div>${web}</div>`);
+  if (c.note) out.push(`<div class="contact-text muted">${linkify(c.note)}</div>`);
+  return out.join('');
+}
 /* Institut anlegen oder bearbeiten, mit Kontenzuordnung. back: Kontodialog, zu dem danach zurückgekehrt wird. */
 function openInst(id, opts = {}) {
   const i = id ? DB.institutes[id] : null;
   const accts = new Set(Object.values(DB.accounts).filter(a => i && a.institute === i.id).map(a => a.name).concat(opts.assign || []));
   ED = { mode: 'inst', id: i ? i.id : null, name: i ? i.name : '', blz: i ? i.blz : '', bic: i ? i.bic : '',
-    color: i ? i.color : '#5b6b74', fg: i ? i.fg : '#ffffff', accts, back: opts.back || null };
+    color: i ? i.color : '#5b6b74', fg: i ? i.fg : '#ffffff', contact: Object.assign(emptyContact(), i && i.contact), accts, back: opts.back || null };
   showDialog();
 }
 function instForm() {
@@ -1549,6 +1593,12 @@ function instForm() {
       <label class="field"><span>BIC</span><input type="text" id="in-bic" value="${esc(e.bic)}" placeholder="optional"></label>
       <label class="field"><span>Farbe</span><input type="color" id="in-color" value="${esc(e.color)}"></label>
       <label class="field"><span>Schriftfarbe</span><input type="color" id="in-fg" value="${esc(e.fg)}"></label>
+    </div>
+    <h3 class="step">Kontakt</h3>
+    <div class="form">
+      ${Object.entries(CONTACT_FIELDS).map(([k, [label, ph]]) => k === 'address' || k === 'note'
+        ? `<label class="field wide"><span>${label}</span><textarea id="in-c-${k}" rows="2" placeholder="${esc(ph)}">${esc(e.contact[k])}</textarea></label>`
+        : `<label class="field"><span>${label}</span><input type="text" id="in-c-${k}" value="${esc(e.contact[k])}" placeholder="${esc(ph)}"></label>`).join('')}
     </div>
     <p class="muted">Bekannte Banken (z. B. Sparkasse, Volksbank, DKB) bekommen Farbe und Bankleitzahl automatisch, wenn du nichts änderst. Ein eigenes Logo und den Online-Zugang richtest du danach unter Konten &amp; Daten beim Institut ein.</p>
     ${list.length ? `<div class="field wide"><span>Konten zuordnen</span>
@@ -1571,6 +1621,7 @@ function saveInst() {
   const id = e.id || ('u' + Date.now());
   const inst = DB.institutes[id] || (DB.institutes[id] = newInstitute(id, name));
   Object.assign(inst, { name, blz, bic: $('#in-bic').value.trim().toUpperCase(), color, fg });
+  inst.contact = {}; for (const k of Object.keys(CONTACT_FIELDS)) { const v = $('#in-c-' + k).value.trim(); if (v) inst.contact[k] = v; }
   let n = 0;
   for (const cb of document.querySelectorAll('#dlg [data-inacct]')) {
     const a = DB.accounts[cb.dataset.inacct]; if (!a) continue;
@@ -1653,16 +1704,27 @@ function renameCategory(from, to) {
     if (!DB.categories[nk]) DB.categories[nk] = c;
   }
   for (const t of DB.tx) { t.category = map(t.category); for (const s of t.splits || []) s.category = map(s.category); }
+  catRefsMap(map);
   if (UI.f.cat === from) UI.f.cat = to;
+}
+/* Regeln und Verträge zeigen auf Kategorien: beim Umbenennen und Zusammenführen mitziehen,
+   sonst legt die nächste Regel-Zuordnung den alten Namen wieder an. */
+function catRefsMap(map) {
+  for (const r of DB.rules || []) if (r.category) r.category = map(r.category);
+  for (const c of DB.contracts || []) if (c.category) c.category = map(c.category);
 }
 function mergeCategory(from, to) {
   for (const t of DB.tx) { if (t.category === from) t.category = to; for (const s of t.splits || []) if (s.category === from) s.category = to; }
+  catRefsMap(c => c === from ? to : c);
   delete DB.categories[from];
   if (!DB.categories[to]) DB.categories[to] = { name: to, income: false, desc: '' };
 }
 function deleteCategory(name) {
   let n = 0;
   for (const t of DB.tx) { if (t.category === name) { t.category = ''; n++; } for (const s of t.splits || []) if (s.category === name) { s.category = ''; n++; } }
+  /* Regeln auf diese Kategorie würden sie beim nächsten Treffer neu anlegen: Kategorie leeren und Regel ausschalten */
+  for (const r of DB.rules || []) if (r.category === name) { r.category = ''; if (!r.transfer) r.active = false; }
+  for (const c of DB.contracts || []) if (c.category === name) c.category = '';
   delete DB.categories[name];
   return n;
 }
@@ -1871,8 +1933,8 @@ function suggestRules() {
 }
 
 /* ---------- Verträge & Abos ---------- */
-const INTERVALS = { weekly: 'wöchentlich', monthly: 'monatlich', quarterly: 'vierteljährlich', halfyear: 'halbjährlich', yearly: 'jährlich' };
-const INTERVAL_MONTHS = { monthly: 1, quarterly: 3, halfyear: 6, yearly: 12 };
+const INTERVALS = { weekly: 'wöchentlich', monthly: 'monatlich', bimonthly: 'alle 2 Monate', quarterly: 'vierteljährlich', halfyear: 'halbjährlich', yearly: 'jährlich' };
+const INTERVAL_MONTHS = { monthly: 1, bimonthly: 2, quarterly: 3, halfyear: 6, yearly: 12 };
 function addMonths(ds, n) {
   let [y, m, d] = ds.split('-').map(Number);
   m += n; y += Math.floor((m - 1) / 12); m = ((m - 1) % 12 + 12) % 12 + 1;
@@ -1885,7 +1947,7 @@ const addInterval = (ds, iv) => iv === 'weekly' ? addDays(ds, 7) : addMonths(ds,
 const perMonth = c => c.interval === 'weekly' ? Math.round(c.amount * 52 / 12) : Math.round(c.amount / (INTERVAL_MONTHS[c.interval] || 1));
 function newContract(extra) {
   return Object.assign({ id: 'c' + Date.now() + Math.floor(Math.random() * 1000), name: '', match: '', category: '', acct: '', amount: 0, interval: 'monthly',
-    start: '', termMonths: 0, renewMonths: 1, noticeValue: 1, noticeUnit: 'months', remind: 30, number: '', note: '', endedAt: '', expired: false }, extra || {});
+    start: '', termMonths: 0, renewMonths: 1, noticeValue: 1, noticeUnit: 'months', remind: 30, number: '', note: '', contact: '', endedAt: '', expired: false }, extra || {});
 }
 function contractPayments(c) {
   if (!c.match) return [];
@@ -1948,6 +2010,7 @@ function contractForm() {
       <label class="field"><span>Gekündigt zum (falls gekündigt)</span><input type="date" id="co-ended" value="${esc(e.endedAt)}"></label>
       <label class="field"><span>Vertrags- / Kundennummer</span><input type="text" id="co-number" value="${esc(e.number)}"></label>
       <label class="field wide"><span>Notiz</span><input type="text" id="co-note" value="${esc(e.note)}" placeholder="z. B. Kündigung per Kundenportal"></label>
+      <label class="field wide"><span>Kontakt (Anschrift, Telefon, E-Mail, Webseite)</span><textarea id="co-contact" rows="4" placeholder="z. B. Musterversicherung AG&#10;Musterstraße 1, 12345 Musterstadt&#10;Tel. 0800 123456 · service@example.de">${esc(e.contact || '')}</textarea></label>
     </div>
     <p class="muted">Seit März 2022 sind neue Verbraucherverträge in Deutschland nach der Mindestlaufzeit meist monatlich kündbar. Bei älteren Verträgen hilft ein Blick in die Unterlagen.</p>
     <div class="preview" id="co-preview" aria-live="polite"></div>
@@ -1963,7 +2026,7 @@ function readContract() {
   try { e.amount = Math.abs(QIF.amount(v('co-amount') || '0')); } catch (err) { e.amount = NaN; }
   e.start = v('co-start'); e.termMonths = +v('co-term'); e.renewMonths = +v('co-renew');
   e.noticeValue = Math.max(0, +v('co-notice') || 0); e.noticeUnit = v('co-noticeunit'); e.remind = Math.max(0, +v('co-remind') || 0);
-  e.endedAt = v('co-ended'); e.number = v('co-number').trim(); e.note = v('co-note').trim();
+  e.endedAt = v('co-ended'); e.number = v('co-number').trim(); e.note = v('co-note').trim(); e.contact = v('co-contact').trim();
 }
 function updateContractPreview() {
   const el = $('#co-preview'); if (!el || !ED || ED.mode !== 'contract') return;
@@ -2140,7 +2203,7 @@ function suggestContracts() {
     const gaps = list.slice(1).map((t, i) => daysBetween(list[i].date, t.date)).filter(d => d > 0);
     if (gaps.length < 2) continue;
     const mg = med(gaps);
-    const interval = mg >= 5 && mg <= 9 ? 'weekly' : mg >= 25 && mg <= 36 ? 'monthly' : mg >= 80 && mg <= 100 ? 'quarterly' : mg >= 170 && mg <= 195 ? 'halfyear' : mg >= 350 && mg <= 380 ? 'yearly' : null;
+    const interval = mg >= 5 && mg <= 9 ? 'weekly' : mg >= 25 && mg <= 36 ? 'monthly' : mg >= 55 && mg <= 66 ? 'bimonthly' : mg >= 80 && mg <= 100 ? 'quarterly' : mg >= 170 && mg <= 195 ? 'halfyear' : mg >= 350 && mg <= 380 ? 'yearly' : null;
     if (!interval) continue;
     if (gaps.filter(d => Math.abs(d - mg) <= mg * .25).length / gaps.length < .7) continue;
     const amts = list.map(t => -t.amount), ma = med(amts);
@@ -2436,11 +2499,29 @@ function findHeader(rows) {
 function guessMap(head) {
   const m = {}, used = new Set();
   for (const f of ['date', 'amount', 'debit', 'credit', 'sh', 'balance', 'memo2', 'payee', 'memo']) {
-    const i = head.findIndex((h, k) => !used.has(k) && CSV_GUESS[f].test(h));
+    const i = f === 'payee' ? payeeCol(head, used) : head.findIndex((h, k) => !used.has(k) && CSV_GUESS[f].test(h));
     if (i >= 0) { m[f] = i; used.add(i); }
   }
   if (m.date === undefined) { const i = head.findIndex(h => /datum|date|valuta|wertstellung/i.test(h)); if (i >= 0) m.date = i; }
   return m;
+}
+/* Spalte mit dem Gegenüber. Volksbanken/PSD haben zuerst „Bezeichnung/Bankname Auftragskonto“ (das eigene Konto)
+   und erst danach „Name Zahlungsbeteiligter“: eindeutige Namen zuerst, Spalten zum eigenen Konto nie. */
+const OWN_ACCT_COL = /auftragskonto|bankname|kontobezeichnung|bezeichnung/i;
+function payeeCol(head, used = new Set()) {
+  const ok = k => !used.has(k) && !OWN_ACCT_COL.test(head[k]);
+  const strong = /(zahlungsbeteiligt|empfänger|auftraggeber|begünstigt|beguenstigt|zahlungspflichtig|gegenkonto.*name|name.*gegenkonto)/i;
+  let i = head.findIndex((h, k) => ok(k) && strong.test(h));
+  if (i < 0) i = head.findIndex((h, k) => ok(k) && CSV_GUESS.payee.test(h));
+  return i;
+}
+/* Gemerkte Zuordnung aus älteren Versionen: zeigt „Empfänger“ auf die Spalte des eigenen Kontos, nimm die richtige. */
+function fixSavedMap(head, map) {
+  if (map.payee != null && OWN_ACCT_COL.test(head[map.payee] || '')) {
+    const used = new Set(Object.entries(map).filter(([f]) => f !== 'payee').map(([, i]) => i));
+    const i = payeeCol(head, used); if (i >= 0) map.payee = i; else delete map.payee;
+  }
+  return map;
 }
 function parseDateAny(s) {
   s = (s || '').trim();
@@ -2545,7 +2626,7 @@ function csvState(name, buf, size) {
   if (rows.length < 2) return null;
   const headerIdx = findHeader(rows), head = rows[headerIdx];
   const sig = head.join('|'), saved = (DB.csvMaps || {})[sig];
-  const st = { file: name, text, sep, rows, headerIdx, map: saved ? Object.assign({}, saved.map) : guessMap(head),
+  const st = { file: name, text, sep, rows, headerIdx, map: saved ? fixSavedMap(head, Object.assign({}, saved.map)) : guessMap(head),
     acct: '', skipDup: true, remembered: !!saved, size, meta: csvMeta(rows, headerIdx), saveIban: true, newType: 'Bank' };
   st.newName = st.meta.name || name.replace(/\.[^.]+$/, '');
   if (/kredit|darlehen/i.test(st.meta.name)) st.newType = 'Oth L';
@@ -2757,7 +2838,9 @@ const TR_INCOME = new Set([TR_CAT.interest, TR_CAT.div, TR_CAT.gain, TR_CAT.save
 const trCents = s => { const v = parseFloat(String(s || '').trim()); return isNaN(v) ? 0 : Math.round(v * 100); };
 function trRows(st) {
   const head = st.rows[0];
-  return st.rows.slice(1).map(r => Object.fromEntries(head.map((h, i) => [h, r[i] ?? '']))).filter(x => x.date && x.transaction_id)
+  /* Der Export schreibt leere Felder als „null“ und hängt es teils an Texte an („REWE Markt GmbHnull“) */
+  const clean = v => String(v ?? '').replace(/null$/i, '').trim();
+  return st.rows.slice(1).map(r => Object.fromEntries(head.map((h, i) => [h, clean(r[i])]))).filter(x => x.date && x.transaction_id)
     .sort((a, b) => (a.datetime || a.date).localeCompare(b.datetime || b.date));
 }
 /* Zerlegt die Datei in Buchungen. side: 'cash' oder 'depot'; pair: Index der Gegenbuchung einer Umbuchung */
@@ -3950,7 +4033,13 @@ Views.buchungen = () => {
         ${f.acct || f.month || f.cat || f.tag || f.q ? '<button id="f-reset">Filter löschen</button>' : ''}
       </div>
       ${nSel ? selectionBar(list) : ''}
-      <div class="row spread"><span class="muted">${list.length} Buchungen · Haken für Mehrfachauswahl, mit Umschalt einen Bereich · Doppelklick öffnet eine Buchung<span class="xlegend"><span class="chip tout">→ nach</span><span class="chip tin">← von</span></span></span><span>Summe <b class="num ${moneyCls(sum)}">${money(sum)}</b></span></div>
+      <div class="row spread"><span class="muted">${list.length} Buchungen · Haken für Mehrfachauswahl, mit Umschalt einen Bereich · Doppelklick öffnet eine Buchung<span class="xlegend"><span class="chip tout">→ nach</span><span class="chip tin">← von</span></span></span><span>Summe <b class="num ${moneyCls(sum)}">${money(sum)}</b>${(() => {
+        /* Bei einem einzelnen Konto zusätzlich der Kontostand (Anfangssaldo + Buchungen), bei Zeitraumfilter am Ende des Zeitraums */
+        if (!f.acct || !DB.accounts[f.acct]) return '';
+        const end = !f.month ? TODAY : f.month.length === 4 ? f.month + '-12-31' : new Date(Date.UTC(+f.month.slice(0, 4), +f.month.slice(5, 7), 0)).toISOString().slice(0, 10);
+        const b = balance(f.acct, end);
+        return ` · <span title="Anfangssaldo + alle Buchungen bis ${dDE(end)}, unabhängig von Kategorie-, Tag- und Suchfilter">Kontostand ${f.month ? 'am ' + dDE(end) : 'heute'} <b class="num ${moneyCls(b)}">${money(b)}</b></span>`;
+      })()}</span></div>
       <div class="table-wrap"><table>
         <thead><tr><th class="sel"><input type="checkbox" id="sel-all" ${allSel ? 'checked' : ''} aria-label="Alle ${list.length} gefilterten Buchungen auswählen" title="Alle ${list.length} gefilterten Buchungen auswählen"></th><th>Datum</th><th>Konto</th><th>Empfänger / Memo</th><th>Kategorie</th><th class="r">Betrag</th><th></th></tr></thead>
         <tbody>${rows || '<tr><td colspan="7" class="muted">Keine Buchungen für diesen Filter.</td></tr>'}</tbody>
@@ -4508,6 +4597,25 @@ Views.depot = () => {
     + '<p class="muted">Einstand nach Durchschnittskosten, ohne Gebühren. Kurse über onvista, bevorzugt vom Handelsplatz LS Exchange. Dafür wird nur die ISIN übertragen.</p>';
 };
 
+/* ---------- Kontakte: Institute und Verträge mit ihren Kontaktdaten ---------- */
+Views.kontakte = () => {
+  const insts = Object.values(DB.institutes || {}).sort((a, b) => a.name.localeCompare(b.name, 'de'));
+  const accts = id => Object.values(DB.accounts).filter(a => a.institute === id).sort((a, b) => (a.inactive - b.inactive) || a.name.localeCompare(b.name, 'de'));
+  const instCard = i => { const list = accts(i.id); return `<div class="panel contact-card"><div class="inst-head">${logo(i, 40)}
+      <div class="inst-title"><h2>${esc(i.name)} <button class="icon" data-instedit="${esc(i.id)}" aria-label="Kontakt von ${esc(i.name)} bearbeiten" title="Kontaktdaten bearbeiten">✎</button></h2>
+        <span class="muted">${list.length ? list.map(a => esc(a.name) + (a.inactive ? ' (inaktiv)' : '')).join(' · ') : 'kein Konto zugeordnet'}</span></div></div>
+      ${hasContact(i) ? contactHtml(i.contact) : '<p class="muted">Noch keine Kontaktdaten. Über ✎ eintragen.</p>'}</div>`; };
+  const cos = (DB.contracts || []).filter(c => c.contact && contractInfo(c).status !== 'ended').sort((a, b) => a.name.localeCompare(b.name, 'de'));
+  const coCard = c => `<div class="panel contact-card"><h2>${esc(c.name)} <button class="icon" data-coedit="${esc(c.id)}" aria-label="Vertrag ${esc(c.name)} bearbeiten" title="Vertrag bearbeiten">✎</button></h2>
+      <span class="muted">${[c.category, c.number && 'Nr. ' + c.number].filter(Boolean).map(esc).join(' · ')}</span>
+      <div class="contact-text">${linkify(c.contact)}</div></div>`;
+  return `<div class="row spread"><h1>Kontakte</h1></div>
+    <p class="muted">Kontaktdaten deiner Banken und Verträge an einem Ort. Bei den Banken trägst du sie über ✎ ein, bei Verträgen im Vertrag unter „Kontakt“. Karten sperren geht bei allen deutschen Banken auch über den Sperr-Notruf 116 116.</p>
+    <h2 class="step">Banken und Institute</h2>
+    <div class="contact-grid">${insts.length ? insts.map(instCard).join('') : '<p class="muted">Noch keine Institute.</p>'}</div>
+    <h2 class="step">Verträge</h2>
+    <div class="contact-grid">${cos.length ? cos.map(coCard).join('') : '<p class="muted">Noch kein Vertrag mit Kontaktdaten.</p>'}</div>`;
+};
 Views.vertraege = () => {
   const list = DB.contracts.map(c => ({ c, i: contractInfo(c) }));
   const running = list.filter(x => x.i.status !== 'ended');
@@ -4522,7 +4630,7 @@ Views.vertraege = () => {
   const year = UI.coPer === 'year', per = x => year ? x * 12 : x;
   const row = ({ c, i }) => { const off = i.status === 'ended', byDate = off && !c.expired; return `<tr class="${off ? 'ghost' : ''}">
       <td class="ghost-keep"><input type="checkbox" id="coexp-${slug(c.id)}" data-coexp="${esc(c.id)}" ${off ? 'checked' : ''} ${byDate ? 'disabled' : ''} aria-label="${esc(c.name)} ausgelaufen" title="${byDate ? `Beendet am ${dDE(c.endedAt)} (im Vertrag eingetragen)` : 'Ausgelaufen: wird ausgegraut und nicht mehr mitgerechnet'}"></td>
-      <td><b>${esc(c.name)}</b> <button class="icon ghost-keep" data-coedit="${esc(c.id)}" aria-label="Vertrag ${esc(c.name)} bearbeiten" title="Bearbeiten">✎</button>${c.category ? `<span class="sub">${esc(c.category)}</span>` : ''}${c.number ? `<span class="sub">Nr. ${esc(c.number)}</span>` : ''}</td>
+      <td><b>${esc(c.name)}</b> <button class="icon ghost-keep" data-coedit="${esc(c.id)}" aria-label="Vertrag ${esc(c.name)} bearbeiten" title="Bearbeiten">✎</button>${c.category ? `<span class="sub">${esc(c.category)}</span>` : ''}${c.number ? `<span class="sub">Nr. ${esc(c.number)}</span>` : ''}${c.contact ? `<details class="sub contact"><summary>Kontakt</summary><div class="contact-text">${linkify(c.contact)}</div></details>` : ''}</td>
       <td class="r num">${money(c.amount)}<span class="sub">${INTERVALS[c.interval]}</span></td>
       <td>${c.expired ? '<span class="chip">ausgelaufen</span>' : deadlineChip(c, i)}</td>
       <td>${i.last ? `<span class="num">${dDE(i.last.date)}</span>${i.priceChanged ? `<span class="chip warn" title="Vertrag: ${money(c.amount)}">jetzt ${money(-i.last.amount)}</span>` : ''}<span class="sub">${i.payments.length} Zahlungen${i.nextPayment && !off ? ' · nächste ≈ ' + dDE(i.nextPayment) : ''}</span>` : `<span class="muted">${c.match ? 'keine Zahlungen gefunden' : 'nicht verknüpft'}</span>`}</td>
@@ -4658,10 +4766,17 @@ Views.import = () => {
         ${Object.values(DB.accounts).sort((a, b) => a.name.localeCompare(b.name, 'de')).map(a => `<option value="${esc(a.name)}" ${r.target === a.name ? 'selected' : ''}>${esc(a.name)}${a.inactive ? ' (inaktiv)' : ''}</option>`).join('')}
         </select></label>${r.selfName ? `<span class="muted">Erkannt am Eröffnungssaldo: „${esc(r.selfName)}“.</span>` : ''}</div>` : '';
     const skipped = Object.entries(r.skipped).filter(([k]) => !/^(Memorized)$/i.test(k));
+    /* Gegenkonten aus [Konto]-Kategorien, die weder in der Datei noch in Kontor stehen: zuordnen statt Phantomkonto anlegen */
+    const unknown = qifUnknownTargets(r);
+    const allAccts = [...new Set([...Object.keys(DB.accounts), ...r.accounts.map(a => a.name)])].sort((a, b) => a.localeCompare(b, 'de'));
+    const xmapSel = unknown.length ? `<div class="notice"><p><b>${unknown.length === 1 ? 'Ein Gegenkonto' : unknown.length + ' Gegenkonten'} aus Umbuchungen kennt Kontor nicht.</b> Heißt das Konto in Kontor anders (z. B. „PSD Bank2“ statt „PSD Bank Giro“), ordne es zu. Sonst entsteht ein neues Konto, und Umbuchungen stehen doppelt.</p>
+        <div class="table-wrap"><table><tbody>${unknown.map(([name, n]) => `<tr><td><b>${esc(name)}</b><span class="sub">${n} Umbuchungen</span></td>
+          <td><select data-xmap="${esc(name)}" aria-label="Gegenkonto ${esc(name)} zuordnen"><option value="">Neues Konto „${esc(name)}“ anlegen</option>
+          ${allAccts.map(a => `<option value="${esc(a)}" ${r.xmap[name] === a ? 'selected' : ''}>${esc(a)}</option>`).join('')}</select></td></tr>`).join('')}</tbody></table></div></div>` : '';
     preview = `<div class="panel">
       <div class="row spread"><h2>Vorschau: ${esc(p.file)}</h2><span class="chip ${r.problems.length ? 'warn' : 'ok'}">${r.problems.length ? r.problems.length + ' Probleme' : 'Keine Fehler'}</span></div>
       <p class="muted">${r.accounts.length} Konten, ${r.categories.length} Kategorien, ${r.classes.length} Klassen, ${r.tx.length} Buchungen. Datumsformat ${r.order === 'MDY' ? 'Monat.Tag.Jahr' : 'Tag.Monat.Jahr'}${r.guessed ? ' (erkannt)' : ' (laut Datei)'}.</p>
-      ${targetSel}
+      ${targetSel}${xmapSel}
       <div class="table-wrap"><table><thead><tr><th>Konto</th><th>Typ</th><th class="r">Buchungen</th><th class="r">Neu</th><th>Zeitraum</th><th class="r">Summe</th></tr></thead><tbody>
       ${r.accounts.map(a => { const x = per[a.name]; return `<tr><td>${esc(a.name)}${DB.accounts[a.name] ? ' <span class="chip">vorhanden</span>' : ''}</td><td>${esc(acctType(a.type))}</td><td class="r num">${x ? x.n : 0}${x && x.splits ? `<span class="sub">${x.splits} Splits</span>` : ''}</td><td class="r num">${x ? x.n - x.dup : 0}</td><td class="num">${x ? dDE(x.min) + ' – ' + dDE(x.max) : '–'}</td><td class="r num ${x ? moneyCls(x.sum) : ''}">${x ? money(x.sum) : '–'}</td></tr>`; }).join('')}
       </tbody></table></div>
@@ -4767,7 +4882,8 @@ function instPanel(i, list) {
   const inactive = list.filter(a => a.inactive).length;
   const head = `<div class="inst-head">${logo(i, 44)}
       <div class="inst-title"><h2>${i ? esc(i.name) : 'Ohne Institut'}${i ? ` <button class="icon" data-instedit="${esc(i.id)}" aria-label="Institut bearbeiten" title="Name, BLZ, Farbe und Konten">✎</button>` : ''}</h2>
-        <span class="muted">${i && i.blz ? 'BLZ ' + esc(i.blz) + ' · ' : ''}${list.length} ${list.length === 1 ? 'Konto' : 'Konten'}${inactive ? `, davon ${inactive} inaktiv` : ''}</span></div>
+        <span class="muted">${i && i.blz ? 'BLZ ' + esc(i.blz) + ' · ' : ''}${list.length} ${list.length === 1 ? 'Konto' : 'Konten'}${inactive ? `, davon ${inactive} inaktiv` : ''}</span>
+        ${hasContact(i) ? `<details class="sub contact" ${UI.open[i.id + 'contact'] ? 'open' : ''} data-key="${esc(i.id)}contact"><summary>Kontakt</summary>${contactHtml(i.contact)}</details>` : ''}</div>
       <div class="inst-side">${i ? `<span class="chip ${cls}">${st}</span>` : ''}<b class="num ${moneyCls(sum)}">${money(sum)}</b></div></div>`;
   if (!i) return `<div class="panel">${head}${accountRows(list)}<div class="row"><span class="muted">Ordne diese Konten im Auswahlfeld unter dem Kontonamen einem Institut zu, oder</span><button data-instfor="1">+ Institut für diese Konten anlegen</button></div></div>`;
   const id = slug(i.id);
@@ -4893,6 +5009,16 @@ function qifPrepare(r) {
   }
 }
 const qifSkip = (r, t) => !t.acct || t.dup === 'key' || (t.dup === 'near' && !r.keepNear);
+/* Gegenkonten der neuen Buchungen, die es weder in der Datei noch in Kontor gibt: [[Name, Anzahl], …] */
+function qifUnknownTargets(r) {
+  r.xmap = r.xmap || {};
+  const known = new Set([...Object.keys(DB.accounts), ...r.accounts.map(a => a.name)]), cnt = {};
+  for (const t of r.tx) {
+    if (qifSkip(r, t)) continue;
+    for (const to of [t.transfer, ...t.splits.map(s => s.transfer)]) if (to && to !== t.acct && !known.has(to)) cnt[to] = (cnt[to] || 0) + 1;
+  }
+  return Object.entries(cnt).sort((a, b) => b[1] - a[1]);
+}
 function commitImport() {
   const p = UI.pending; if (!p) return;
   const r = p.parsed, impId = 'i' + Date.now();
@@ -4904,9 +5030,10 @@ function commitImport() {
   for (const c of r.categories) if (!DB.categories[c.name]) DB.categories[c.name] = { name: c.name, income: c.income, desc: c.desc };
   DB.classes = [...new Set([...DB.classes, ...r.classes])];
   let n = 0; const added = [];
+  const xm = to => (to && r.xmap && r.xmap[to]) || to;   // in der Vorschau zugeordnete Gegenkonten
   for (const t of r.tx) {
     if (qifSkip(r, t)) continue;
-    const nt = { id: ++DB.seq, imp: impId, key: t.key, acct: t.acct, date: t.date, amount: t.amount, payee: t.payee, memo: t.memo, number: t.number, cleared: t.cleared, category: t.category, cls: t.cls, transfer: t.transfer, splits: t.splits.map(s => ({ category: s.category, cls: s.cls, transfer: s.transfer, memo: s.memo, amount: s.amount })) };
+    const nt = { id: ++DB.seq, imp: impId, key: t.key, acct: t.acct, date: t.date, amount: t.amount, payee: t.payee, memo: t.memo, number: t.number, cleared: t.cleared, category: t.category, cls: t.cls, transfer: xm(t.transfer), splits: t.splits.map(s => ({ category: s.category, cls: s.cls, transfer: xm(s.transfer), memo: s.memo, amount: s.amount })) };
     DB.tx.push(nt); added.push(nt);
     n++;
   }
@@ -5016,6 +5143,7 @@ document.addEventListener('change', e => {
   else if (t.id === 'csv-archive') { UI.csv.archive = t.checked; }
   else if (t.id === 'restore' && t.files[0]) restoreBackup(t.files[0]);
   else if (t.id === 'imp-target' && UI.pending) { UI.pending.parsed.target = t.value; qifPrepare(UI.pending.parsed); render(); }
+  else if (t.dataset && t.dataset.xmap !== undefined && UI.pending) { const r = UI.pending.parsed; r.xmap = r.xmap || {}; if (t.value) r.xmap[t.dataset.xmap] = t.value; else delete r.xmap[t.dataset.xmap]; render(); }
   else if (t.id === 'imp-keepnear' && UI.pending) { UI.pending.parsed.keepNear = t.checked; render(); }
   else if (t.dataset.coexp) {
     const c = DB.contracts.find(x => x.id === t.dataset.coexp); if (!c) return;
