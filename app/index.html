@@ -103,6 +103,10 @@ tr.xin > td:first-child { box-shadow: inset 3px 0 0 var(--tin); }
 .chart text { fill: var(--muted); font-size: 0.786rem; font-family: var(--font); }
 .chart .grid { stroke: var(--line); }
 .chart .in { fill: var(--pos); } .chart .out { fill: var(--minus); }
+.chart a.mbar { cursor: pointer; }
+.chart a.mbar .hit { fill: transparent; }
+.chart a.mbar:hover rect:not(.hit), .chart a.mbar:focus rect:not(.hit) { opacity: .8; }
+.chart a.mbar:focus { outline: none; } .chart a.mbar:focus .hit { fill: var(--accent-soft); }
 .legend { display: flex; gap: 14px; font-size: 0.857rem; color: var(--muted); }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
 .drop { border: 2px dashed var(--line); border-radius: 10px; padding: 28px; text-align: center; display: flex; flex-direction: column; gap: 10px; align-items: center; }
@@ -1121,7 +1125,14 @@ const CHART_HIDE_KEY = 'kontor-monat-aus';
 const chartHidden = (() => { try { return new Set(JSON.parse(localStorage.getItem(CHART_HIDE_KEY)) || []); } catch (e) { return new Set(); } })();
 const UI = { ovGroup: (() => { try { return localStorage.getItem('kontor-ovgroup') || 'type'; } catch (err) { return 'type'; } })(), sel: new Set(), lastSel: null, coPer: (() => { try { return localStorage.getItem('fm-coper') || 'month'; } catch (err) { return 'month'; } })(), year: null, f: { acct: '', month: '', cat: '', tag: '', q: '' }, limit: 150, pending: null, open: {}, catTab: 'report', catQ: '', sim: {},
   exp: { kind: 'tx', year: '', acct: '', format: 'de', splits: false, inactive: true } };
-const NOFILTER = () => ({ acct: '', month: '', cat: '', tag: '', q: '' });
+const NOFILTER = () => ({ acct: '', month: '', cat: '', tag: '', q: '', kind: '' });
+/* Filter nach Art wie in der Übersicht: Einnahmen, Ausgaben, Gespart, Getilgt; „savetilg“ = Gespart und getilgt (lila Balken) */
+const KIND_FILTERS = { in: 'Nur Einnahmen', out: 'Nur Ausgaben', save: 'Nur Gespart', tilg: 'Nur Getilgt', savetilg: 'Gespart und getilgt' };
+function txKindMatch(t, kind, ctx, act) {
+  if (!act.has(t.acct)) return false;   // die Übersicht zählt nur aktive Konten
+  const want = kind === 'savetilg' ? ['save', 'tilg'] : [kind];
+  return txParts(t, ctx).some(f => want.includes(f.kind) && !((f.kind === 'in' || f.kind === 'out') && f.cat && XFER_ONLY.test(f.cat)));
+}
 const amtDE = c => (Math.abs(c) / 100).toFixed(2).replace('.', ',');
 const parseTags = s => [...new Set(String(s || '').split(',').map(x => x.trim()).filter(Boolean))];
 
@@ -3832,7 +3843,10 @@ Views.uebersicht = () => {
   const sumSav = sav.reduce((a, b) => a + b, 0), sumTil = til.reduce((a, b) => a + b, 0);
   const accts = Object.values(DB.accounts).filter(a => !a.inactive && !loanOfAcct(a.name)).sort((a, b) => a.name.localeCompare(b.name, 'de'));
   const hidden = Object.values(DB.accounts).filter(a => a.inactive && !loanOfAcct(a.name)).length;
-  const total = accts.reduce((s, a) => s + balance(a.name), 0);
+  const total = accts.reduce((s, a) => s + balance(a.name), 0);   // alle Konten, für das Nettovermögen
+  const giro = accts.filter(a => a.type === 'Bank'), savings = accts.filter(a => a.type === 'Save' || a.type === 'Oth T');
+  const giroSum = giro.reduce((s, a) => s + balance(a.name), 0), saveSum = savings.reduce((s, a) => s + balance(a.name), 0);
+  const kj = (kind, label) => `<a href="#buchungen" data-kindjump="${kind}" data-kindmonth="${esc(UI.year)}" title="Buchungen ${esc(label)} ${esc(UI.year)} anzeigen">${esc(label)} ${esc(UI.year)}</a>`;
   const rate = sumIn ? Math.round((sumIn - sumOut) / sumIn * 100) : 0;
   const unc = DB.tx.filter(t => act.has(t.acct) && isUncategorized(t)).length;
   // Anfangssaldo fehlt nur, wenn weder ein Bankstand eingetragen noch das Konto gesperrt ist (0 € kann richtig sein)
@@ -3845,7 +3859,8 @@ Views.uebersicht = () => {
     ${missingOpening ? `<div class="notice"><button type="button" class="x" data-dismiss-open="${esc(openKey)}" aria-label="Hinweis ausblenden" title="Ausblenden, bis sich etwas ändert">✕</button>Bei ${missingOpening === 1 ? 'einem Konto' : missingOpening + ' Konten'} fehlt der Anfangssaldo (${esc(openMiss.join(', '))}), daher stimmen die Kontostände noch nicht. <a href="#konten">Jetzt eintragen</a></div>` : ''}
     ${contractAlerts().sort((a, b) => a.i.daysLeft - b.i.daysLeft).map(({ c, i }) => `<div class="notice ${i.level === 'crit' ? 'crit' : ''}">Kündigungsfrist: <b>${esc(c.name)}</b> kündigen bis ${dDE(i.deadline)} (${i.daysLeft === 0 ? 'heute' : 'in ' + i.daysLeft + ' Tagen'}). <a href="#vertraege">Zu den Verträgen</a></div>`).join('')}
     <div class="kpis">
-      <div class="kpi"><div class="label">Gesamtsaldo heute</div><div class="value num ${moneyCls(total)}">${money(total)}</div></div>
+      <div class="kpi"><div class="label">Gesamtsaldo heute</div><div class="value num ${moneyCls(giroSum)}">${money(giroSum)}</div><div class="sub muted" title="${esc(giro.map(a => a.name).join(', '))}">${giro.length} ${giro.length === 1 ? 'Girokonto' : 'Girokonten'}</div></div>
+      ${savings.length ? `<div class="kpi"><div class="label">Gesamt gespart</div><div class="value num ${moneyCls(saveSum)}">${money(saveSum)}</div><div class="sub muted" title="${esc(savings.map(a => a.name).join(', '))}">${savings.length === 1 ? esc(savings[0].name) : savings.length + ' Spar- und Tagesgeldkonten'}</div></div>` : ''}
       ${(() => {
         const dv = Object.values(DB.accounts).filter(isDepot).map(a => depotValue(a.name)).filter(Boolean);
         if (!dv.length) return '';
@@ -3857,10 +3872,10 @@ Views.uebersicht = () => {
         if (!pv.length) return '';
         return `<div class="kpi"><div class="label"><a href="#rente">Rentenverträge</a></div><div class="value num">${money(pv.reduce((s, x) => s + x.value, 0))}</div><div class="sub muted">Fondsguthaben${pv.some(x => x.live) ? ' zum aktuellen Kurs' : ''}</div></div>`;
       })()}
-      <div class="kpi"><div class="label">Einnahmen ${UI.year}</div><div class="value num">${money(sumIn)}</div></div>
-      <div class="kpi"><div class="label">Ausgaben ${UI.year}</div><div class="value num">${money(sumOut)}</div></div>
-      <div class="kpi"><div class="label">Gespart ${UI.year}</div><div class="value num ${moneyCls(sumSav)}">${money(sumSav)}</div><div class="sub muted">auf Spar-, Depot- und Rentenkonten, Entnahmen abgezogen</div></div>
-      ${sumTil ? `<div class="kpi"><div class="label">Getilgt ${UI.year}</div><div class="value num ${moneyCls(sumTil)}">${money(sumTil)}</div><div class="sub muted">${sumTil > 0 ? 'Schulden abgebaut, ohne Zinsen' : 'mehr Kredit aufgenommen als getilgt'}</div></div>` : ''}
+      <div class="kpi"><div class="label">${kj('in', 'Einnahmen')}</div><div class="value num">${money(sumIn)}</div></div>
+      <div class="kpi"><div class="label">${kj('out', 'Ausgaben')}</div><div class="value num">${money(sumOut)}</div></div>
+      <div class="kpi"><div class="label">${kj('save', 'Gespart')}</div><div class="value num ${moneyCls(sumSav)}">${money(sumSav)}</div><div class="sub muted">auf Spar-, Depot- und Rentenkonten, Entnahmen abgezogen</div></div>
+      ${sumTil ? `<div class="kpi"><div class="label">${kj('tilg', 'Getilgt')}</div><div class="value num ${moneyCls(sumTil)}">${money(sumTil)}</div><div class="sub muted">${sumTil > 0 ? 'Schulden abgebaut, ohne Zinsen' : 'mehr Kredit aufgenommen als getilgt'}</div></div>` : ''}
       <div class="kpi"><div class="label">Sparquote ${UI.year}</div><div class="value num ${moneyCls(rate)}">${rate} %</div><div class="sub muted">Einnahmen minus Ausgaben</div></div>
       ${DB.loans.some(l => l.direction !== 'claim') ? (() => {
         const debt = DB.loans.filter(l => l.direction !== 'claim').reduce((s, l) => s + loanInfo(l).balanceToday, 0);
@@ -3916,7 +3931,9 @@ function monthChart(inc, out, sav) {
     const x0 = x - (ser.length * bw + (ser.length - 1) * gap) / 2;
     ser.forEach(([k, l], i) => {
       const v = data[k][m];
-      bars += `<rect class="${k}" x="${(x0 + i * (bw + gap)).toFixed(1)}" y="${y(v)}" width="${bw}" height="${y(0) - y(v)}" rx="2"><title>${MONTHS[m]} ${l} ${money(raw[k][m])}</title></rect>`;
+      // Klick öffnet die Buchungen dieses Monats und dieser Art; unsichtbare Fläche über die ganze Höhe, damit auch kleine Balken treffbar sind
+      const mon = `${UI.year}-${String(m + 1).padStart(2, '0')}`, xb = (x0 + i * (bw + gap)).toFixed(1);
+      bars += `<a href="#buchungen" class="mbar" data-kindjump="${k === 'save' ? 'savetilg' : k}" data-kindmonth="${mon}" aria-label="${MONTHS[m]} ${l} ${money(raw[k][m])}, Buchungen anzeigen"><rect class="hit" x="${xb}" y="${T}" width="${bw}" height="${y(0) - T}"/><rect class="${k}" x="${xb}" y="${y(v)}" width="${bw}" height="${y(0) - y(v)}" rx="2"/><title>${MONTHS[m]} ${l} ${money(raw[k][m])} · Klick zeigt die Buchungen</title></a>`;
     });
     bars += `<text x="${x}" y="${H - 6}" text-anchor="middle">${MONTHS[m]}</text>`;
   }
@@ -3973,7 +3990,9 @@ function emptyState() {
 
 function currentTxList() {
   const f = UI.f, set = acctSet(f.acct);
+  const kctx = f.kind ? wealthCtx() : null, kact = f.kind ? activeNames() : null;
   return DB.tx.filter(t =>
+    (!f.kind || txKindMatch(t, f.kind, kctx, kact)) &&
     (!set || set.has(t.acct)) &&
     (!f.month || t.date.startsWith(f.month)) &&
     (!f.cat || (f.cat === '__none' ? isUncategorized(t) : f.cat === '__xfer' ? (t.transfer && t.transfer !== t.acct) : f.cat === '__xhint' ? !!transferHint(t, UI.xidx || (UI.xidx = xferIndex())) : txInCat(t, f.cat))) &&
@@ -3989,7 +4008,10 @@ Views.buchungen = () => {
   let list = currentTxList();
   UI.xidx = null;
   list = list.slice().sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id);
-  const sum = list.reduce((s, t) => s + t.amount, 0);
+  /* Mit Filter nach Art zählt nur der passende Teil (z. B. bei einer Kreditrate nur die Zinsen als Ausgabe), wie in der Übersicht */
+  const sum = f.kind ? (() => { const ctx = wealthCtx(), want = f.kind === 'savetilg' ? ['save', 'tilg'] : [f.kind];
+    return list.reduce((s, t) => s + txParts(t, ctx).filter(p => want.includes(p.kind) && !((p.kind === 'in' || p.kind === 'out') && p.cat && XFER_ONLY.test(p.cat))).reduce((x, p) => x + p.amount, 0), 0); })()
+    : list.reduce((s, t) => s + t.amount, 0);
   // Auswahl gilt nur für die gefilterten Buchungen
   const inList = new Set(list.map(t => t.id));
   for (const id of UI.sel) if (!inList.has(id)) UI.sel.delete(id);
@@ -4028,9 +4050,10 @@ Views.buchungen = () => {
         <select id="f-acct" aria-label="Konto oder Kontogruppe"><option value="">Alle Konten</option>${acctFilterOptions(f.acct)}</select>
         <select id="f-month" aria-label="Zeitraum"><option value="">Alle Zeiträume</option>${monthOpts}</select>
         <select id="f-cat" aria-label="Kategorie"><option value="">Alle Kategorien</option><option value="__none" ${f.cat === '__none' ? 'selected' : ''}>Ohne Kategorie</option><option value="__xfer" ${f.cat === '__xfer' ? 'selected' : ''}>Nur Umbuchungen</option><option value="__xhint" ${f.cat === '__xhint' ? 'selected' : ''}>Mögliche Umbuchungen</option>${catFilterOptions(f.cat)}</select>
+        <select id="f-kind" aria-label="Art" title="Wie in der Übersicht gezählt: nur aktive Konten, ohne Umbuchungen zwischen eigenen Girokonten"><option value="">Alle Arten</option>${Object.entries(KIND_FILTERS).map(([k, l]) => `<option value="${k}" ${f.kind === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
         <select id="f-tag" aria-label="Tag"><option value="">Alle Tags</option><option value="__none" ${f.tag === '__none' ? 'selected' : ''}>Ohne Tag</option>${DB.tags.map(g => `<option ${g === f.tag ? 'selected' : ''}>${esc(g)}</option>`).join('')}</select>
         <input id="f-q" type="search" placeholder="Suche (Empfänger, Memo, Tag, Betrag)" value="${esc(f.q)}" style="flex:1 1 200px">
-        ${f.acct || f.month || f.cat || f.tag || f.q ? '<button id="f-reset">Filter löschen</button>' : ''}
+        ${f.acct || f.month || f.cat || f.tag || f.q || f.kind ? '<button id="f-reset">Filter löschen</button>' : ''}
       </div>
       ${nSel ? selectionBar(list) : ''}
       <div class="row spread"><span class="muted">${list.length} Buchungen · Haken für Mehrfachauswahl, mit Umschalt einen Bereich · Doppelklick öffnet eine Buchung<span class="xlegend"><span class="chip tout">→ nach</span><span class="chip tin">← von</span></span></span><span>Summe <b class="num ${moneyCls(sum)}">${money(sum)}</b>${(() => {
@@ -5094,6 +5117,7 @@ document.addEventListener('change', e => {
   else if (t.dataset.ruleactive) { const r = DB.rules.find(x => x.id === t.dataset.ruleactive); r.active = t.checked; save(); render(); }
   else if (t.id === 'sel-tagrm') { if (t.value) bulkTag(t.value, false); }
   else if (t.id === 'f-tag') { UI.f.tag = t.value; UI.limit = 150; render(); }
+  else if (t.id === 'f-kind') { UI.f.kind = t.value; UI.limit = 150; render(); }
   else if (t.dataset.catname) {
     const from = t.dataset.catname, to = t.value.trim();
     if (!to || to === from) { t.value = from; return; }
@@ -5552,7 +5576,8 @@ document.addEventListener('click', e => {
     return;
   }
   if (t.dataset.tagdelyes) { const n = deleteTag(t.dataset.tagdelyes); save(); render(); return toast(`Tag gelöscht${n ? ` und bei ${n} Buchungen entfernt` : ''}.`); }
-  if (t.dataset.acct) { UI.f = Object.assign(NOFILTER(), { acct: t.dataset.acct }); }
+  if (t.dataset.kindjump) { UI.f = Object.assign(NOFILTER(), { kind: t.dataset.kindjump, month: t.dataset.kindmonth || '' }); UI.limit = 150; }
+  else if (t.dataset.acct) { UI.f = Object.assign(NOFILTER(), { acct: t.dataset.acct }); }
   else if (t.dataset.catjump) { UI.f = Object.assign(NOFILTER(), { cat: t.dataset.catjump, month: t.dataset.catyear || '' }); UI.limit = 150; }
   else if (t.dataset.uncat) { UI.f = Object.assign(NOFILTER(), { cat: '__none' }); }
   else if (t.id === 'f-reset') { UI.f = NOFILTER(); render(); }
