@@ -11,7 +11,7 @@
   <Config Name="Web-Port" Target="8080" Default="8090" Mode="tcp" Description="Port der Weboberfläche" Type="Port" Display="always" Required="true">8090</Config>
   <Config Name="Daten" Target="/data" Default="/mnt/user/appdata/kontor" Mode="rw" Description="Daten, Sicherungen und FinTS-Zustand" Type="Path" Display="always" Required="true">/mnt/user/appdata/kontor</Config>
   <Config Name="Eingangsordner" Target="/eingang" Default="/mnt/user/finanzen/eingang" Mode="rw" Description="Hierhin heruntergeladene Kontoauszüge (PDF) und Umsätze (CSV) legen, z. B. über eine SMB-Freigabe" Type="Path" Display="always" Required="false">/mnt/user/finanzen/eingang</Config>
-  <Config Name="Passwort" Target="APP_PASSWORD" Default="" Description="Passwort für die Weboberfläche (Benutzername beliebig). Leer = keine Anmeldung." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Passwort" Target="APP_PASSWORD" Default="" Description="Passwort für den ersten Start (Benutzername beliebig). Kontor speichert es als Hash, danach kann das Feld leer bleiben; ändern in Kontor unter Einstellungen. Leer beim ersten Start = keine Anmeldung." Type="Variable" Display="always" Required="false" Mask="true"></Config>
   <Config Name="FinTS-Produkt-ID" Target="FINTS_PRODUCT_ID" Default="" Description="Registrierungsnummer der Deutschen Kreditwirtschaft für den FinTS-Abruf" Type="Variable" Display="always" Required="false"></Config>
   <Config Name="Zeitzone" Target="TZ" Default="Europe/Berlin" Description="" Type="Variable" Display="advanced" Required="false">Europe/Berlin</Config>
 </Container>

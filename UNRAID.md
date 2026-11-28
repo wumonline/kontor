@@ -41,7 +41,7 @@ Dann im Reiter **Docker** → **Container hinzufügen** → Vorlage **kontor** w
 |---|---|
 | Web-Port | 8090 (oder ein freier Port) |
 | Daten | `/mnt/user/appdata/kontor` |
-| Passwort | unbedingt setzen, der Benutzername im Anmeldefenster ist beliebig |
+| Passwort | für den ersten Start setzen, der Benutzername im Anmeldefenster ist beliebig. Kontor speichert es als Hash in `appdata/kontor/auth.json`; danach kann das Feld leer bleiben. Ändern in Kontor unter **Einstellungen → Sicherheit** |
 | Eingangsordner | `/mnt/user/finanzen/eingang`, siehe Abschnitt 6 |
 | FinTS-Produkt-ID | siehe Abschnitt 5 |
 
@@ -106,8 +106,15 @@ PDFs müssen echten Text enthalten. Eingescannte Auszüge ohne Texterkennung lan
 
 ## Sicherheit
 
-- **Passwort setzen.** Ohne Passwort kann jeder im Heimnetz die Finanzdaten sehen.
+- **Passwort setzen.** Ohne Passwort kann jeder im Heimnetz die Finanzdaten sehen. Gespeichert wird nur ein
+  Hash (PBKDF2-SHA256) in `appdata/kontor/auth.json`, nicht das Passwort. Statt Klartext in der Vorlage geht auch
+  die Variable `APP_PASSWORD_HASH`; den Wert erzeugt `docker exec -it kontor python /srv/server/app.py hash`.
+  **Passwort vergessen:** `appdata/kontor/auth.json` löschen, in der Vorlage ein neues Passwort eintragen, Container neu starten.
 - Nicht ins Internet freigeben. Für den Zugriff von unterwegs WireGuard (in Unraid eingebaut) nutzen.
+- **Zugriff über VPN begrenzen:** In Kontor unter **Einstellungen → Sicherheit** wählen, was Geräte außerhalb des
+  Heimnetzes dürfen: voller Zugriff, nur lesen oder gesperrt. Heimnetz sind standardmäßig `192.168.0.0/16` und
+  `172.16.0.0/12`; das Unraid-WireGuard (meist `10.253.0.x`) zählt damit als „von außen“. Gespeichert in
+  `appdata/kontor/access.json`, ändern lässt es sich nur aus dem Heimnetz.
 - Zwischen Browser und Server läuft die PIN unverschlüsselt über HTTP, solange kein HTTPS davor sitzt.
   Im eigenen Netz ist das vertretbar; mit einem Reverse Proxy (z. B. Nginx Proxy Manager) und HTTPS ist es besser.
 

@@ -8,16 +8,24 @@ Umgebungsvariablen:
   PORT              Port im Container (Standard 8080)
   DATA_DIR          Datenordner (Standard /data)
   APP_DIR           Ordner mit index.html (Standard ../app neben diesem Skript)
-  APP_PASSWORD      wenn gesetzt: Anmeldung per Browser-Dialog (Benutzername beliebig)
+  APP_PASSWORD      Passwort für den ersten Start: wird als Hash in DATA_DIR/auth.json übernommen,
+                    danach kann die Variable leer bleiben (Passwort ändern in Kontor unter Einstellungen)
+  APP_PASSWORD_HASH statt Klartext ein fertiger Hash (python app.py hash erzeugt ihn)
   FINTS_PRODUCT_ID  bei der Deutschen Kreditwirtschaft registrierte Produkt-ID
   BACKUP_KEEP       Anzahl stündlicher Sicherungen (Standard 72)
   BACKUP_DAYS       Anzahl täglicher Sicherungen (Standard 30)
+
+Anmeldung per Browser-Dialog (Benutzername beliebig). Passwort vergessen: DATA_DIR/auth.json löschen
+und APP_PASSWORD neu setzen.
+Zugriff aus anderen Netzen (z. B. VPN) regelt DATA_DIR/access.json: voll, nur lesen oder gesperrt.
 
 Sicherungen in DATA_DIR/backups: stündlich und täglich beim Speichern, dazu bei jedem
 Start mit einer neuen Version (kontor-vor-<version>-<zeit>.json, die letzten 10 bleiben).
 """
 import base64
+import hashlib
 import hmac
+import ipaddress
 import json
 import mimetypes
 import os
@@ -53,6 +61,7 @@ HOST = os.environ.get('HOST', '0.0.0.0')   # 127.0.0.1 = nur von diesem Rechner 
 DATA_DIR = os.path.abspath(os.environ.get('DATA_DIR', '/data'))
 APP_DIR = os.path.abspath(os.environ.get('APP_DIR', os.path.join(HERE, '..', 'app')))
 PASSWORD = os.environ.get('APP_PASSWORD', '')
+PASSWORD_HASH = os.environ.get('APP_PASSWORD_HASH', '').strip()
 BACKUP_KEEP = int(os.environ.get('BACKUP_KEEP', '72'))
 BACKUP_DAYS = int(os.environ.get('BACKUP_DAYS', '30'))
 UPDATE_KEEP = 10
@@ -60,6 +69,8 @@ MAX_BODY = 64 * 1024 * 1024
 
 DATA_FILE = os.path.join(DATA_DIR, 'kontor.json')
 OLD_DATA_FILE = os.path.join(DATA_DIR, 'finanzmanager.json')   # Name bis zur Umbenennung in Kontor
+AUTH_FILE = os.path.join(DATA_DIR, 'auth.json')
+ACCESS_FILE = os.path.join(DATA_DIR, 'access.json')
 BACKUP_DIR = os.path.join(DATA_DIR, 'backups')
 LOCK = threading.Lock()
 
@@ -158,6 +169,135 @@ def backup_overview():
     return out
 
 
+# ---------- Passwort ----------
+# Gespeichert wird nur ein PBKDF2-SHA256-Hash mit Salz, nie das Passwort selbst.
+# Format (auch für APP_PASSWORD_HASH): pbkdf2_sha256$<runden>$<salz hex>$<hash hex>
+
+PBKDF2_ROUNDS = 600_000
+AUTH = {'hash': ''}          # aktueller Hash; leer = keine Anmeldung
+_AUTH_OK = set()             # Fingerabdrücke schon geprüfter Passwörter (PBKDF2 ist absichtlich langsam)
+_AUTH_LOCK = threading.Lock()
+
+
+def make_hash(pw, rounds=PBKDF2_ROUNDS):
+    salt = os.urandom(16)
+    dk = hashlib.pbkdf2_hmac('sha256', pw.encode('utf-8'), salt, rounds)
+    return f'pbkdf2_sha256${rounds}${salt.hex()}${dk.hex()}'
+
+
+def check_hash(pw, stored):
+    try:
+        scheme, rounds, salt, want = stored.split('$')
+        if scheme != 'pbkdf2_sha256':
+            return False
+        dk = hashlib.pbkdf2_hmac('sha256', pw.encode('utf-8'), bytes.fromhex(salt), int(rounds))
+        return hmac.compare_digest(dk.hex(), want)
+    except Exception:
+        return False
+
+
+def set_password_hash(h):
+    AUTH['hash'] = h
+    _AUTH_OK.clear()
+    if h:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        tmp = AUTH_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump({'hash': h, 'changed': datetime.now().isoformat(timespec='seconds')}, f)
+        os.replace(tmp, AUTH_FILE)
+        try:
+            os.chmod(AUTH_FILE, 0o600)
+        except OSError:
+            pass
+    else:
+        # Anmeldung bewusst abgeschaltet: leerer Eintrag, damit APP_PASSWORD sie beim Neustart nicht wieder einschaltet
+        with open(AUTH_FILE, 'w', encoding='utf-8') as f:
+            json.dump({'hash': '', 'changed': datetime.now().isoformat(timespec='seconds')}, f)
+
+
+def load_auth():
+    """Reihenfolge: in Kontor gespeicherter Hash > APP_PASSWORD_HASH > APP_PASSWORD (wird beim ersten Start gehasht)."""
+    try:
+        with open(AUTH_FILE, encoding='utf-8') as f:
+            AUTH['hash'] = json.load(f).get('hash', '')
+        if PASSWORD and not check_hash(PASSWORD, AUTH['hash']):
+            log('Hinweis: APP_PASSWORD wird ignoriert, es gilt das in Kontor gespeicherte Passwort.')
+        elif PASSWORD:
+            log('Hinweis: Das Passwort ist als Hash gespeichert. Die Variable APP_PASSWORD kann jetzt leer bleiben.')
+        return
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        log(f'auth.json nicht lesbar ({e}), Anmeldung aus den Variablen')
+    if PASSWORD_HASH:
+        AUTH['hash'] = PASSWORD_HASH
+    elif PASSWORD:
+        set_password_hash(make_hash(PASSWORD))
+        log('Passwort aus APP_PASSWORD als Hash gespeichert. Die Variable kann jetzt in der Unraid-Vorlage geleert werden.')
+
+
+def password_ok(pw):
+    h = AUTH['hash']
+    fp = hashlib.sha256((h + '\0' + pw).encode('utf-8')).hexdigest()
+    if fp in _AUTH_OK:
+        return True
+    if check_hash(pw, h):
+        with _AUTH_LOCK:
+            if len(_AUTH_OK) > 20:
+                _AUTH_OK.clear()
+            _AUTH_OK.add(fp)
+        return True
+    return False
+
+
+# ---------- Zugriff aus anderen Netzen ----------
+# „Heimnetz“ sind die eingetragenen Netze (Standard: 192.168.x.x und 172.16-31.x.x, dazu immer localhost).
+# Unraid-WireGuard vergibt meist 10.253.0.x, das zählt dann als „von außen“.
+ACCESS_MODES = {'full': 'voller Zugriff', 'read': 'nur lesen', 'off': 'gesperrt'}
+DEFAULT_NETS = ['192.168.0.0/16', '172.16.0.0/12']
+ACCESS = {'remote': 'full', 'nets': list(DEFAULT_NETS)}
+
+
+def _net(n):
+    try:
+        return ipaddress.ip_network(str(n).strip(), strict=False)
+    except ValueError:
+        return None
+
+
+def load_access():
+    try:
+        with open(ACCESS_FILE, encoding='utf-8') as f:
+            a = json.load(f)
+        if a.get('remote') in ACCESS_MODES:
+            ACCESS['remote'] = a['remote']
+        if isinstance(a.get('nets'), list) and any(_net(n) for n in a['nets']):
+            ACCESS['nets'] = [str(_net(n)) for n in a['nets'] if _net(n)]
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        log(f'access.json nicht lesbar ({e}), voller Zugriff')
+
+
+def save_access():
+    tmp = ACCESS_FILE + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as f:
+        json.dump(ACCESS, f)
+    os.replace(tmp, ACCESS_FILE)
+
+
+def is_home(ip, nets=None):
+    try:
+        a = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    if getattr(a, 'ipv4_mapped', None):
+        a = a.ipv4_mapped
+    if a.is_loopback:
+        return True
+    return any(a in n for n in map(_net, nets if nets is not None else ACCESS['nets']) if n and n.version == a.version)
+
+
 # ---------- HTTP ----------
 
 class Handler(BaseHTTPRequestHandler):
@@ -186,15 +326,30 @@ class Handler(BaseHTTPRequestHandler):
         raw = self.rfile.read(n) if n else b''
         return json.loads(raw.decode('utf-8')) if raw else {}
 
+    def home(self):
+        return is_home(self.client_address[0])
+
+    def mode(self):
+        """full / read / off für diese Anfrage"""
+        return 'full' if self.home() else ACCESS['remote']
+
     def authorized(self):
-        if not PASSWORD:
+        if self.mode() == 'off':
+            body = 'Kontor ist von außerhalb des Heimnetzes gesperrt.'.encode('utf-8')
+            self.send_response(403)
+            self.send_header('Content-Type', 'text/plain; charset=utf-8')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return False
+        if not AUTH['hash']:
             return True
         h = self.headers.get('Authorization', '')
         if h.startswith('Basic '):
             try:
                 user_pw = base64.b64decode(h[6:]).decode('utf-8')
                 pw = user_pw.split(':', 1)[1] if ':' in user_pw else ''
-                if hmac.compare_digest(pw.encode('utf-8'), PASSWORD.encode('utf-8')):
+                if password_ok(pw):
                     return True
             except Exception:
                 pass
@@ -209,6 +364,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Referrer-Policy', 'no-referrer')
         self.send_header('X-Frame-Options', 'DENY')
 
+    def read_only(self, path):
+        """Bei „nur lesen“ von außen: Änderungen ablehnen. Die Kursabfrage ändert nichts und bleibt erlaubt."""
+        if self.mode() == 'read' and path != '/api/quotes':
+            self.send_json(403, {'error': 'Zugriff von außerhalb des Heimnetzes: nur lesen. Änderungen sind gesperrt.', 'readOnly': True})
+            return True
+        return False
+
     def end_headers(self):
         self.common_headers()
         super().end_headers()
@@ -219,9 +381,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/health':
             # ohne Anmeldung, damit der Docker-Healthcheck funktioniert; verrät nichts über die Daten
             return self.send_json(200, {'ok': True, 'version': VERSION, 'fints': fints_session.available(),
-                                        'productId': bool(fints_session.PRODUCT_ID), 'auth': bool(PASSWORD)})
+                                        'productId': bool(fints_session.PRODUCT_ID), 'auth': bool(AUTH['hash'])})
         if not self.authorized():
             return
+        if path == '/api/access':
+            return self.send_json(200, {'ip': self.client_address[0], 'home': self.home(), 'mode': self.mode(),
+                                        'remote': ACCESS['remote'], 'nets': ACCESS['nets'], 'auth': bool(AUTH['hash'])})
         if path == '/api/data':
             with LOCK:
                 store = read_store()
@@ -288,7 +453,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
         path = urlparse(self.path).path
-        if not self.authorized():
+        if not self.authorized() or self.read_only(path):
             return
         if path == '/api/archive/upload':
             q = parse_qs(urlparse(self.path).query)
@@ -320,12 +485,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
-        if not self.authorized():
+        if not self.authorized() or self.read_only(path):
             return
         try:
             body = self.read_json()
         except Exception as e:
             return self.send_json(400, {'error': f'Ungültige Anfrage: {e}'})
+        if path == '/api/access':
+            return self.set_access(body if isinstance(body, dict) else {})
+        if path == '/api/password':
+            return self.set_password(body if isinstance(body, dict) else {})
         if path.startswith('/api/drop/') or path.startswith('/api/archive/'):
             return self.drop_post(path, body if isinstance(body, dict) else {})
         if path == '/api/quotes':
@@ -355,6 +524,41 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json(200, {'ok': True})
         return self.send_json(404, {'error': 'Nicht gefunden'})
 
+    def set_access(self, body):
+        # Nur aus dem Heimnetz änderbar, sonst könnte man sich von außen selbst freischalten
+        if not self.home():
+            return self.send_json(403, {'error': 'Die Zugriffsregeln lassen sich nur aus dem Heimnetz ändern.'})
+        mode, nets = body.get('remote'), body.get('nets')
+        if mode not in ACCESS_MODES:
+            return self.send_json(400, {'error': 'Unbekannte Einstellung.'})
+        if not isinstance(nets, list) or not [n for n in nets if str(n).strip()]:
+            return self.send_json(400, {'error': 'Mindestens ein Heimnetz angeben, z. B. 192.168.0.0/24.'})
+        nets = [n for n in nets if str(n).strip()]
+        bad = [str(n) for n in nets if not _net(n)]
+        if bad:
+            return self.send_json(400, {'error': 'Kein gültiges Netz: ' + ', '.join(bad)})
+        new = [str(_net(n)) for n in nets]
+        ip = self.client_address[0]
+        if not is_home(ip, new):
+            return self.send_json(400, {'error': f'Deine Adresse {ip} läge danach außerhalb des Heimnetzes. Bitte das eigene Netz mit eintragen.'})
+        with LOCK:
+            ACCESS['remote'], ACCESS['nets'] = mode, new
+            save_access()
+        log(f'Zugriff von außen: {ACCESS_MODES[mode]}, Heimnetz {", ".join(new)}')
+        return self.send_json(200, {'ok': True, 'remote': mode, 'nets': new})
+
+    def set_password(self, body):
+        old, new = str(body.get('old') or ''), str(body.get('new') or '')
+        if AUTH['hash'] and not password_ok(old):
+            return self.send_json(403, {'error': 'Das bisherige Passwort stimmt nicht.'})
+        if new and len(new) < 8:
+            return self.send_json(400, {'error': 'Das neue Passwort braucht mindestens 8 Zeichen.'})
+        if not new and not self.home():
+            return self.send_json(403, {'error': 'Die Anmeldung lässt sich nur aus dem Heimnetz abschalten.'})
+        set_password_hash(make_hash(new) if new else '')
+        log('Passwort geändert' if new else 'Anmeldung abgeschaltet')
+        return self.send_json(200, {'ok': True, 'auth': bool(new)})
+
     def serve_static(self, path):
         rel = unquote(path).lstrip('/') or 'index.html'
         if rel.endswith('/'):
@@ -379,7 +583,16 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
+    if sys.argv[1:2] == ['hash']:
+        import getpass
+        pw = getpass.getpass('Passwort: ')
+        if pw != getpass.getpass('Noch einmal: '):
+            sys.exit('Die Eingaben stimmen nicht überein.')
+        print(make_hash(pw))
+        return
     os.makedirs(DATA_DIR, exist_ok=True)
+    load_auth()
+    load_access()
     if not os.path.exists(DATA_FILE) and os.path.exists(OLD_DATA_FILE):
         os.replace(OLD_DATA_FILE, DATA_FILE)
         log('Datendatei finanzmanager.json in kontor.json umbenannt')
@@ -390,7 +603,7 @@ def main():
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
     srv.daemon_threads = True
     log(f'Kontor {VERSION} auf Port {PORT}, Daten in {DATA_DIR}, '
-        f'Anmeldung {"an" if PASSWORD else "AUS"}, FinTS {"bereit" if fints_session.available() else "nicht installiert"}'
+        f'Anmeldung {"an" if AUTH["hash"] else "AUS"}, von außen {ACCESS_MODES[ACCESS["remote"]]}, FinTS {"bereit" if fints_session.available() else "nicht installiert"}'
         f'{"" if fints_session.PRODUCT_ID else " (ohne Produkt-ID)"}')
     drop.setup(DATA_DIR)
     log(f'Eingangsordner {drop.DROP_DIR} {"bereit" if drop.available() else "FEHLT oder nicht beschreibbar"}')
